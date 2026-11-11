@@ -1,0 +1,98 @@
+[
+  {
+    "id": "T-001",
+    "descripcion": "Armar la versión 4 del presupuesto Q4 con los cambios del CRM y de Soporte",
+    "responsable": "Martín Ruiz",
+    "fecha": "2026-11-04",
+    "estado": "abierta",
+    "reunion": "cierre-presupuesto-q4-operaciones"
+  },
+  {
+    "id": "T-002",
+    "descripcion": "Presentar el presupuesto a Dirección",
+    "responsable": "Laura Gómez",
+    "fecha": "2026-11-09",
+    "estado": "abierta",
+    "reunion": "cierre-presupuesto-q4-operaciones"
+  },
+  {
+    "id": "T-003",
+    "descripcion": "Avisar a Sofía y a Diego del cambio de fechas del CRM antes del kickoff",
+    "responsable": "sin definir",
+    "fecha": "2026-11-03",
+    "estado": "vencida",
+    "reunion": "cierre-presupuesto-q4-operaciones"
+  },
+  {
+    "id": "T-004",
+    "descripcion": "Hablar con Recursos Humanos para publicar la búsqueda de la persona de Soporte",
+    "responsable": "Laura Gómez",
+    "fecha": "sin definir",
+    "estado": "abierta",
+    "reunion": "cierre-presupuesto-q4-operaciones"
+  },
+  {
+    "id": "T-005",
+    "descripcion": "Revisar el impacto del tipo de cambio de diciembre en las licencias en dólares",
+    "responsable": "sin definir",
+    "fecha": "2026-11-30",
+    "estado": "abierta",
+    "reunion": "cierre-presupuesto-q4-operaciones"
+  },
+  {
+    "id": "T-006",
+    "descripcion": "Comunicar los cambios del presupuesto al resto del equipo en la retro",
+    "responsable": "sin definir",
+    "fecha": "2026-11-06",
+    "estado": "abierta",
+    "reunion": "cierre-presupuesto-q4-operaciones"
+  },
+  {
+    "id": "T-007",
+    "descripcion": "Enviar el informe de la caída del portal, con la alerta propuesta para evitar otro vencimiento de certificado",
+    "responsable": "Valentina Ríos",
+    "fecha": "2026-11-03",
+    "estado": "vencida",
+    "reunion": "weekly-de-operaciones"
+  },
+  {
+    "id": "T-008",
+    "descripcion": "Reenviar a Ana el detalle de gastos de octubre",
+    "responsable": "Martín Ruiz",
+    "fecha": "2026-11-02",
+    "estado": "vencida",
+    "reunion": "weekly-de-operaciones"
+  },
+  {
+    "id": "T-009",
+    "descripcion": "Llamar al proveedor C para pedirle la cotización de licencias",
+    "responsable": "Pablo Ibáñez",
+    "fecha": "2026-11-06",
+    "estado": "abierta",
+    "reunion": "weekly-de-operaciones"
+  },
+  {
+    "id": "T-010",
+    "descripcion": "Pasar la plantilla del mail a clientes para el protocolo de incidentes",
+    "responsable": "Valentina Ríos",
+    "fecha": "sin definir",
+    "estado": "abierta",
+    "reunion": "weekly-de-operaciones"
+  },
+  {
+    "id": "T-011",
+    "descripcion": "Cerrar el protocolo de comunicación de incidentes, con la regla del post mortem y la alerta propuesta",
+    "responsable": "sin definir",
+    "fecha": "2026-11-06",
+    "estado": "abierta",
+    "reunion": "weekly-de-operaciones"
+  },
+  {
+    "id": "T-012",
+    "descripcion": "Asistir al kickoff del CRM",
+    "responsable": "Valentina Ríos",
+    "fecha": "2026-11-03",
+    "estado": "vencida",
+    "reunion": "weekly-de-operaciones"
+  }
+]
