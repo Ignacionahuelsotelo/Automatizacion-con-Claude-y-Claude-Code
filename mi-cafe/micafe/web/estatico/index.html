@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Mi Café</title>
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <div class="pagina">
+    <header class="cabecera">
+      <p class="fecha" id="fecha-hoy"></p>
+      <h1>Mi Café</h1>
+      <p class="bajada">Los números del día y las notas de ayer, con su fuente.</p>
+    </header>
+
+    <section>
+      <h2 class="rotulo">Indicadores</h2>
+      <p id="avisos-indicadores" class="aviso" role="status" aria-live="polite" hidden></p>
+      <ul id="lista-indicadores"></ul>
+      <p id="estado-indicadores" class="estado" aria-live="polite"></p>
+    </section>
+
+    <div class="principal">
+      <section>
+        <h2 class="rotulo">Resumen de hoy</h2>
+        <div class="pedido">
+          <label for="pedido-noticias">¿Qué noticias querés ver hoy? Es opcional.</label>
+          <textarea id="pedido-noticias" rows="2" maxlength="500" aria-describedby="contador-pedido"></textarea>
+          <p id="contador-pedido" class="contador" aria-live="polite">0/500</p>
+        </div>
+        <button type="button" id="boton-resumen" class="boton">Preparar el de hoy</button>
+        <p id="estado-claude" class="estado" aria-live="polite"></p>
+        <p id="estado-resumen" class="estado" aria-live="polite"></p>
+        <ol id="etapas-resumen" class="etapas" aria-live="polite" hidden></ol>
+        <p id="aviso-corrector" class="aviso" role="status" aria-live="polite" hidden></p>
+        <p id="cabecera-resumen" class="cabecera-resumen" hidden></p>
+        <div id="resumen" class="resumen"></div>
+        <p id="estado-voto-resumen" class="estado" aria-live="polite"></p>
+        <div id="caja-preguntas" class="caja-preguntas" hidden>
+          <h3>Preguntarle a Claude sobre una nota</h3>
+          <p id="nota-elegida"></p>
+          <label for="pregunta">Tu pregunta (se responde solo con lo que dice la nota)</label>
+          <textarea id="pregunta" rows="2" maxlength="500" aria-describedby="nota-elegida"></textarea>
+          <p><button type="button" id="boton-pregunta" class="boton" disabled>Preguntar</button></p>
+          <p id="estado-pregunta" class="estado" aria-live="polite"></p>
+          <div id="respuesta-pregunta" class="respuesta-pregunta" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <div class="lateral">
+        <section>
+          <h2 class="rotulo">Noticias de ayer</h2>
+          <p id="avisos-noticias" class="aviso" role="status" aria-live="polite" hidden></p>
+          <ul id="lista-noticias"></ul>
+          <p id="estado-gustos" class="estado" aria-live="polite"></p>
+          <p id="estado-noticias" class="estado" aria-live="polite"></p>
+        </section>
+
+        <section>
+          <h2 class="rotulo">Mis preferencias</h2>
+          <p id="aviso" class="aviso" role="status" aria-live="polite" hidden></p>
+          <fieldset>
+            <legend>Indicadores</legend>
+            <div id="indicadores"></div>
+          </fieldset>
+          <fieldset>
+            <legend>Temas</legend>
+            <div id="temas"></div>
+          </fieldset>
+          <p id="estado" class="estado" aria-live="polite"></p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

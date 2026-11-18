@@ -1,0 +1,4 @@
+# Solo para desarrollo (pruebas de la página, spec 26). La app NO lo necesita.
+# Aprobado por el usuario el 18/11/2026: únicamente Playwright (Python).
+# Se instala en .venv-dev/, nunca en el Python del sistema (ver README.md).
+playwright==1.65.2

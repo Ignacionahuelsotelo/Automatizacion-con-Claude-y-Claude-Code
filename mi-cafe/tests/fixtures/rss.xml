@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Medio de prueba</title>
+  <item><title>Nota de ayer a la mañana</title><link>https://medio.test/ayer-1</link><pubDate>Tue, 17 Nov 2026 09:00:00 -0300</pubDate></item>
+  <item><title>Nota de ayer a la noche</title><link>https://medio.test/ayer-2</link><pubDate>Tue, 17 Nov 2026 23:59:00 -0300</pubDate></item>
+  <item><title>Nota de hoy</title><link>https://medio.test/hoy</link><pubDate>Wed, 18 Nov 2026 00:00:00 -0300</pubDate></item>
+  <item><title>Nota sin fecha</title><link>https://medio.test/sin-fecha</link></item>
+  <item><title>Nota con fecha rota</title><link>https://medio.test/fecha-rota</link><pubDate>ayer a la tarde</pubDate></item>
+  <item><title>Nota sin link</title><pubDate>Tue, 17 Nov 2026 10:00:00 -0300</pubDate></item>
+</channel></rss>

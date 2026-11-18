@@ -1,0 +1,6 @@
+[
+  {"moneda": "USD", "casa": "oficial", "nombre": "Oficial", "compra": 980.0, "venta": 1000.0, "fechaActualizacion": "2026-11-17T15:00:00.000Z"},
+  {"moneda": "USD", "casa": "blue", "nombre": "Blue", "compra": 1180.0, "venta": 1200.0, "fechaActualizacion": "2026-11-17T15:00:00.000Z"},
+  {"moneda": "USD", "casa": "bolsa", "nombre": "Bolsa", "compra": 1090.5, "venta": 1100.5, "fechaActualizacion": "2026-11-17T15:00:00.000Z"},
+  {"moneda": "USD", "casa": "contadoconliqui", "nombre": "Contado con liquidación", "compra": 1120.0, "venta": 1234.5, "fechaActualizacion": "2026-11-17T15:00:00.000Z"}
+]
