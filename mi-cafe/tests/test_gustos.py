@@ -1,4 +1,4 @@
-"""Tests de gustos.py: votos, validación, archivo roto o ausente y últimos 30 votos."""
+"""Tests de gustos.py: votos, validación, archivo roto o ausente y reinicio."""
 
 import json
 import os
@@ -46,6 +46,17 @@ class GustosEnDisco(unittest.TestCase):
         self.assertEqual(leidos[0]["titulo"], "Una nota")  # espacios limpiados
         self.assertEqual(leidos[1]["clave"], "Deportes")
         self.assertIn("-03:00", leidos[1]["votado_en"])  # hora de Buenos Aires
+
+    def test_se_pueden_votar_los_temas_nuevos(self):
+        for tema in ("Sociedad", "Salud y Ciencia", "Espectáculos y Cultura"):
+            votos, errores = gustos.guardar(self.ruta, {"tipo": "tema", "clave": tema, "voto": "me_gusta"})
+            self.assertEqual(errores, [], tema)
+        self.assertEqual([v["clave"] for v in votos], ["Sociedad", "Salud y Ciencia", "Espectáculos y Cultura"])
+
+    def test_se_puede_votar_el_tema_internacional(self):
+        votos, errores = gustos.guardar(self.ruta, {"tipo": "tema", "clave": "Internacional", "voto": "me_gusta"})
+        self.assertEqual(errores, [])
+        self.assertEqual(votos[0]["clave"], "Internacional")
 
     def test_votar_de_nuevo_cambia_el_voto_y_no_duplica(self):
         gustos.guardar(self.ruta, NOTA)
@@ -101,29 +112,45 @@ class GustosEnDisco(unittest.TestCase):
         self.assertEqual(len(gustos.leer(self.ruta)[0]), 1)
 
 
-class UltimosVotos(unittest.TestCase):
-    def test_solo_los_ultimos_30_del_mas_nuevo_al_mas_viejo(self):
-        votos = [_voto(n) for n in range(45)]
-        ultimos = gustos.ultimos(votos)
-        self.assertEqual(len(ultimos), 30)
-        self.assertEqual(ultimos[0]["clave"], "https://x.test/44")
-        self.assertEqual(ultimos[-1]["clave"], "https://x.test/15")
+class Reinicio(unittest.TestCase):
+    def setUp(self):
+        utiles.silenciar(self)
+        carpeta = tempfile.TemporaryDirectory()
+        self.addCleanup(carpeta.cleanup)
+        self.ruta = os.path.join(carpeta.name, "gustos.json")
 
-    def test_lineas_para_el_pedido(self):
-        votos = [{**_voto(1), "voto": "no_me_gusta"},
-                 {"tipo": "tema", "clave": "Deportes", "voto": "me_gusta",
-                  "votado_en": "2026-11-17T10:00:00-03:00"}]
-        lineas = gustos.lineas_para_pedido(votos)
-        self.assertEqual(lineas, [
-            "- Tema Deportes: me gusta.",  # el más nuevo primero
-            "- Nota «Nota 1» (Medio, Política): no me gusta.",
-        ])
+    def test_un_archivo_viejo_sin_reiniciado_en_se_lee_igual(self):
+        with open(self.ruta, "w", encoding="utf-8") as archivo:
+            json.dump({"votos": [_voto(1)]}, archivo)
+        self.assertEqual(gustos.leer(self.ruta), ([_voto(1)], None))
+        self.assertIsNone(gustos.leer_reinicio(self.ruta))
 
-    def test_sin_votos_no_hay_lineas(self):
-        self.assertEqual(gustos.lineas_para_pedido([]), [])
+    def test_sin_archivo_no_hay_reinicio(self):
+        self.assertIsNone(gustos.leer_reinicio(self.ruta))
 
-    def test_el_pedido_nunca_pasa_de_30_lineas(self):
-        self.assertEqual(len(gustos.lineas_para_pedido([_voto(n) for n in range(50)])), 30)
+    def test_reiniciar_guarda_la_fecha_y_no_borra_votos(self):
+        with open(self.ruta, "w", encoding="utf-8") as archivo:
+            json.dump({"votos": [_voto(1), _voto(2)]}, archivo)
+        ahora = datetime(2026, 11, 20, 9, 0, tzinfo=utiles.ZONA)
+        self.assertEqual(gustos.reiniciar(self.ruta, ahora), "2026-11-20T09:00:00-03:00")
+        self.assertEqual(gustos.leer_reinicio(self.ruta), "2026-11-20T09:00:00-03:00")
+        self.assertEqual(len(gustos.leer(self.ruta)[0]), 2)
+
+    def test_un_voto_nuevo_conserva_el_reinicio(self):
+        gustos.reiniciar(self.ruta, datetime(2026, 11, 20, 9, 0, tzinfo=utiles.ZONA))
+        gustos.guardar(self.ruta, NOTA)
+        self.assertEqual(gustos.leer_reinicio(self.ruta), "2026-11-20T09:00:00-03:00")
+        self.assertEqual(len(gustos.leer(self.ruta)[0]), 1)
+
+    def test_reiniciado_en_ilegible_se_ignora(self):
+        with open(self.ruta, "w", encoding="utf-8") as archivo:
+            json.dump({"votos": [], "reiniciado_en": "ayer"}, archivo)
+        self.assertIsNone(gustos.leer_reinicio(self.ruta))
+
+    def test_el_historial_no_se_recorta(self):
+        with open(self.ruta, "w", encoding="utf-8") as archivo:
+            json.dump({"votos": [_voto(n) for n in range(50)]}, archivo)
+        self.assertEqual(len(gustos.leer(self.ruta)[0]), 50)
 
 
 if __name__ == "__main__":

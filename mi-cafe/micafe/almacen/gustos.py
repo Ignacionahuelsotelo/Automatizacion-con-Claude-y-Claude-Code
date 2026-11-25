@@ -3,13 +3,15 @@
 Se guardan en datos/gustos.json. Cada voto tiene:
 - "tipo": "nota" o "tema".
 - "clave": en una nota, su link (es único por nota, como en la deduplicación);
-  en un tema, su nombre (lista cerrada de preferencias.TEMAS).
+  en un tema, su nombre (lista cerrada de config.TEMAS).
 - "voto": "me_gusta" o "no_me_gusta".
 - "votado_en": fecha y hora del voto, en America/Argentina/Buenos_Aires.
 - En las notas, también "titulo", "medio" y "seccion" (el pedido a Claude los usa).
 
-Quitar un voto es mandarlo con voto None: se borra la entrada. Al preparar un
-resumen se pasan solo los últimos 30 votos (decisión 10 de specs/README.md).
+Quitar un voto es mandarlo con voto None: se borra la entrada.
+
+El archivo puede traer también "reiniciado_en" (fecha ISO con zona; spec 41): los votos anteriores
+se ignoran al armar el perfil, pero no se borran. Un archivo viejo sin ese campo se lee igual.
 
 Si el archivo no existe, no se puede leer o está roto, se sigue sin gustos y se
 devuelve un aviso (no se rompe nada). Al guardar un voto nuevo, un archivo roto
@@ -26,13 +28,12 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from micafe.almacen import json_seguro, preferencias
-from micafe.config import CANTIDAD_GUSTOS_PARA_CLAUDE, ZONA
+from micafe.almacen import json_seguro
+from micafe.config import TEMAS, ZONA
 from micafe.modelos import Voto
 
 logger = logging.getLogger(__name__)
 
-CANTIDAD_PARA_CLAUDE = CANTIDAD_GUSTOS_PARA_CLAUDE  # decisión 10 de specs/README.md (ver config.py)
 TIPOS = ("nota", "tema")
 VOTOS = ("me_gusta", "no_me_gusta")
 _candado = threading.Lock()  # el servidor atiende en hilos: leer y escribir de a uno
@@ -45,7 +46,7 @@ def _error_de_clave(tipo: Any, clave: Any) -> str | None:
             return None
         return "La clave de una nota tiene que ser su link (http o https)."
     if tipo == "tema":
-        if isinstance(clave, str) and clave in preferencias.TEMAS:
+        if isinstance(clave, str) and clave in TEMAS:
             return None
         return f"Tema desconocido: {clave!r}."
     return f"Tipo desconocido: {tipo!r}."
@@ -139,8 +140,31 @@ def leer(ruta: str) -> tuple[list[Voto], str | None]:
     return votos, None
 
 
-def _escribir(ruta: str, votos: list[Voto]) -> None:
-    json_seguro.escribir(ruta, {"votos": votos})
+def leer_reinicio(ruta: str) -> str | None:
+    """La fecha de `reiniciado_en` del archivo, o None si no hay, no se entiende o el archivo falta o está roto."""
+    datos, _ = json_seguro.leer(ruta, None)
+    if isinstance(datos, dict) and _votado_en_valido(datos.get("reiniciado_en")):
+        return datos["reiniciado_en"]
+    return None
+
+
+def _escribir(ruta: str, votos: list[Voto], reiniciado_en: str | None) -> None:
+    datos: dict[str, Any] = {"votos": votos}
+    if reiniciado_en:
+        datos["reiniciado_en"] = reiniciado_en
+    json_seguro.escribir(ruta, datos)
+
+
+def reiniciar(ruta: str, ahora: datetime | None = None) -> str:
+    """Marca que lo aprendido se ignora desde ahora. No borra ningún voto. Devuelve la fecha guardada.
+
+    Un fallo de escritura sale como OSError.
+    """
+    momento = (ahora or datetime.now(ZONA)).isoformat(timespec="seconds")
+    with _candado:
+        votos, _ = leer(ruta)
+        _escribir(ruta, votos, momento)
+    return momento
 
 
 def guardar(ruta: str, datos: Any) -> tuple[list[Voto] | None, list[str]]:
@@ -155,26 +179,10 @@ def guardar(ruta: str, datos: Any) -> tuple[list[Voto] | None, list[str]]:
 
     with _candado:
         votos, _ = leer(ruta)
+        reiniciado_en = leer_reinicio(ruta)
         votos = [v for v in votos if (v["tipo"], v["clave"]) != (entrada["tipo"], entrada["clave"])]
         if entrada["voto"] is not None:
             entrada["votado_en"] = datetime.now(ZONA).isoformat(timespec="seconds")
             votos.append(entrada)
-        _escribir(ruta, votos)
+        _escribir(ruta, votos, reiniciado_en)
     return votos, []
-
-
-def ultimos(votos: list[Voto], cantidad: int = CANTIDAD_PARA_CLAUDE) -> list[Voto]:
-    """Los `cantidad` votos más recientes, del más nuevo al más viejo."""
-    return sorted(votos, key=lambda v: datetime.fromisoformat(v["votado_en"]), reverse=True)[:cantidad]
-
-
-def lineas_para_pedido(votos: list[Voto]) -> list[str]:
-    """Los últimos 30 votos como líneas de texto para el pedido a Claude. Lista vacía si no hay."""
-    lineas = []
-    for voto in ultimos(votos):
-        gusto = "me gusta" if voto["voto"] == "me_gusta" else "no me gusta"
-        if voto["tipo"] == "nota":
-            lineas.append(f"- Nota «{voto['titulo']}» ({voto['medio']}, {voto['seccion']}): {gusto}.")
-        else:
-            lineas.append(f"- Tema {voto['clave']}: {gusto}.")
-    return lineas

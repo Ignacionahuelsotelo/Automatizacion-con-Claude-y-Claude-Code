@@ -61,6 +61,22 @@ def mostrar_fecha(momento: datetime | date) -> str:
     return momento.strftime("%d/%m/%Y")
 
 
+MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+         "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def mostrar_mes(fecha: datetime | date) -> str | None:
+    """'octubre 2026' (mes en español, sin día y sin `locale`). Devuelve None si no es una fecha."""
+    if not isinstance(fecha, date):  # datetime es subclase de date
+        return None
+    return f"{MESES[fecha.month - 1]} {fecha.year}"
+
+
+def meses_entre(fecha: date, hoy: date) -> int:
+    """Meses calendario de diferencia entre el mes de `fecha` y el de `hoy` (septiembre a noviembre = 2)."""
+    return (hoy.year * 12 + hoy.month) - (fecha.year * 12 + fecha.month)
+
+
 def dias_habiles_entre(dia: date, hoy: date) -> int:
     """Cuenta los días hábiles (lunes a viernes) posteriores a `dia`, hasta `hoy`.
 

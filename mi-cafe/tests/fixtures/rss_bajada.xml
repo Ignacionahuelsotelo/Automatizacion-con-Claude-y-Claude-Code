@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Medio de prueba</title>
+  <item><title>Con HTML</title><link>https://medio.test/html</link><pubDate>Tue, 17 Nov 2026 09:00:00 -0300</pubDate>
+    <description><![CDATA[<p>Hola &amp; <b>chau</b></p>]]></description>
+    <category>Fútbol</category><category>futbol </category><category>Fútbol</category><category></category><category>River</category></item>
+  <item><title>Con entidades</title><link>https://medio.test/entidades</link><pubDate>Tue, 17 Nov 2026 10:00:00 -0300</pubDate>
+    <description>&amp;#8220;Gran triunfo&amp;#8221; &amp;amp; fiesta</description></item>
+  <item><title>Con script y style</title><link>https://medio.test/script</link><pubDate>Tue, 17 Nov 2026 11:00:00 -0300</pubDate>
+    <description><![CDATA[<style>p { color: red }</style><script>alert(1)</script><p>Texto
+      con   saltos</p>]]></description></item>
+  <item><title>Sin nada</title><link>https://medio.test/nada</link><pubDate>Tue, 17 Nov 2026 12:00:00 -0300</pubDate></item>
+  <item><title>Descripcion vacia</title><link>https://medio.test/vacia</link><pubDate>Tue, 17 Nov 2026 13:00:00 -0300</pubDate>
+    <description><![CDATA[<p> </p>]]></description></item>
+  <item><title>Muchas categorias</title><link>https://medio.test/cats</link><pubDate>Tue, 17 Nov 2026 14:00:00 -0300</pubDate>
+    <category>a</category><category>b</category><category>c</category><category>d</category><category>e</category><category>f</category><category>g</category></item>
+</channel></rss>

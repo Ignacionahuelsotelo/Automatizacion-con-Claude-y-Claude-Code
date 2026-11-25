@@ -1,6 +1,6 @@
 """Corrector de Mi Café: revisa el resumen antes de mostrarlo (spec 07).
 
-Los chequeos con código (largo con los indicadores, enlaces, tope por medio,
+Los chequeos con código (largo del texto, enlaces, tope por medio,
 repetidas dentro del resumen y contra los últimos 3 resúmenes guardados,
 "S&P Merval" y Télam) los hace este módulo. Después, si pasaron, se hace el
 chequeo con modelo: `claude -p` con la skill .claude/skills/corrector/SKILL.md.
@@ -27,7 +27,8 @@ from micafe.config import (
     REINTENTOS_CORRECTOR, SECCIONES,
 )
 from micafe.dominio import resumen
-from micafe.modelos import Nota, Revision
+from micafe.dominio.seleccion import orden_de_recorte
+from micafe.modelos import CupoSeccion, Nota, Revision
 
 ARCHIVO_SKILL = ARCHIVO_SKILL_CORRECTOR
 
@@ -155,35 +156,68 @@ def _chequeo(nombre: str, errores: list[str], detalle: str) -> dict[str, Any]:
 
 # --- Chequeos con código -----------------------------------------------------
 
-def _chequear_codigo(texto: str, notas: list[Nota], tope: int, palabras_indicadores: int,
-                     previos: list[str] | None, minimo: int, maximo: int) -> list[dict[str, Any]]:
+def _notas_por_seccion(texto: str | None) -> tuple[Counter, list[str]]:
+    """Cuenta las notas de cada sección del texto y devuelve también los encabezados en orden."""
+    cuenta: Counter = Counter()
+    encabezados: list[str] = []
+    seccion = ""
+    for bloque in _bloques(texto):
+        lineas = []
+        for linea in (l.strip() for l in bloque.splitlines()):
+            if linea in SECCIONES:
+                seccion = linea
+                encabezados.append(linea)
+            elif linea:
+                lineas.append(linea)
+        if lineas and not lineas[0].startswith((INICIO_APERTURA, INICIO_CIERRE)):
+            cuenta[seccion] += 1
+    return cuenta, encabezados
+
+
+def _texto_recorte(plan: list[CupoSeccion] | None) -> str:
+    """Misma redacción que la skill resumen-diario y el prompt (spec 40)."""
+    base = "Recortá desde las secciones de menor prioridad del plan (pedido, pesos y orden de los temas), nunca los indicadores."
+    if plan:
+        base += f" Orden para recortar: {', '.join(orden_de_recorte(plan))}."
+    return base
+
+
+def _chequear_codigo(texto: str, notas: list[Nota], tope: int,
+                     previos: list[str] | None, minimo: int, maximo: int,
+                     plan: list[CupoSeccion] | None = None, plan_completo: bool = True,
+                     pedidas: list[str] | None = None) -> list[dict[str, Any]]:
     """Devuelve la lista de chequeos (cada uno con sus errores). No llama a ningún modelo."""
     por_link = {nota["link"]: nota for nota in notas}
     bloques = notas_del_texto(texto)
     chequeos = []
 
-    # 1. Largo: texto más el bloque de indicadores, que la página muestra aparte.
-    # Regla de CLAUDE.md: largo objetivo 550-650 palabras; si se pasa, se recorta desde Deportes y Tecnología, nunca los indicadores.
+    # 1. Largo: solo el texto del resumen; los indicadores van aparte y no cuentan (spec 46).
+    # Regla de CLAUDE.md: largo objetivo 550-650 palabras; si se pasa, se recorta desde las secciones de menor
+    # prioridad del plan, nunca los indicadores. El mínimo solo se exige si el plan quedó completo (spec 40).
     palabras_texto = len((texto or "").split())
-    total = palabras_texto + palabras_indicadores
+    total = palabras_texto
     errores = []
-    if total < minimo:
+    if total < minimo and plan_completo:
         errores.append(
-            f"Largo: el resumen tiene {total} palabras con los indicadores y tiene que tener al menos {minimo}. "
-            f"El texto (sin indicadores) tiene que quedar entre {minimo - palabras_indicadores} y "
-            f"{maximo - palabras_indicadores} palabras; ahora tiene {palabras_texto}."
+            f"Largo: el resumen tiene {palabras_texto} palabras y tiene que tener al menos {minimo} "
+            f"(entre {minimo} y {maximo})."
         )
     elif total > maximo:
         errores.append(
-            f"Largo: el resumen tiene {total} palabras con los indicadores y tiene que tener como máximo {maximo}. "
-            f"El texto (sin indicadores) tiene que quedar entre {minimo - palabras_indicadores} y "
-            f"{maximo - palabras_indicadores} palabras; ahora tiene {palabras_texto}. "
-            "Recortá desde Deportes y Tecnología."
+            f"Largo: el resumen tiene {palabras_texto} palabras y tiene que tener como máximo {maximo} "
+            f"(entre {minimo} y {maximo}). "
+            + _texto_recorte(plan)
         )
-    chequeos.append(_chequeo(
-        "Largo", errores,
-        f"{total} palabras con los indicadores (entre {minimo} y {maximo}).",
-    ))
+    if plan_completo:
+        chequeos.append(_chequeo("Largo", errores, f"{total} palabras (entre {minimo} y {maximo})."))
+    elif errores:
+        chequeos.append(_chequeo("Largo", errores, ""))
+    else:
+        chequeos.append({
+            "nombre": "Largo", "errores": [], "omitido": True,
+            "detalle": f"Largo mínimo no exigido: el plan quedó incompleto (hay pocas notas). "
+                       f"El resumen tiene {total} palabras; el máximo es {maximo}.",
+        })
 
     # 2. Enlaces (regla de CLAUDE.md: toda noticia va con link): cada nota con link, y todos los links tienen que ser de las notas de ayer.
     errores = []
@@ -277,6 +311,29 @@ def _chequear_codigo(texto: str, notas: list[Nota], tope: int, palabras_indicado
         "Sin «S&P Merval» ni Télam como agencia.",
     ))
 
+    # 7. Secciones del plan (spec 40): ninguna sección fuera del plan ni con más notas que su cuota.
+    if plan:
+        cuotas = {c["seccion"]: c["cupo"] for c in plan}
+        cuenta, encabezados = _notas_por_seccion(texto)
+        errores = [f"La sección {s} no está en el plan de hoy: sacala." for s in dict.fromkeys(encabezados) if s not in cuotas]
+        errores += [
+            f"La sección {s} tiene {cuenta[s]} notas y su cuota de hoy es {cuota}."
+            for s, cuota in cuotas.items() if cuenta[s] > cuota
+        ]
+        chequeos.append(_chequeo("Secciones del plan", errores, "Solo secciones del plan y sin pasarse de la cuota."))
+
+    # 8. Pedido (spec 40): con 2 o más notas [pedido] el resumen usa al menos 2; con 1, esa.
+    if pedidas:
+        usadas = len(set(pedidas) & set(_links(texto)))
+        necesarias = 2 if len(pedidas) >= 2 else 1
+        errores = []
+        if usadas < necesarias:
+            errores.append(
+                f"Pedido: la persona pidió algo hoy y el resumen incluye {usadas} de las notas marcadas con [pedido]; "
+                f"tiene que incluir al menos {necesarias}."
+            )
+        chequeos.append(_chequeo("Pedido", errores, f"Al menos {necesarias} nota(s) del pedido incluida(s)."))
+
     return chequeos
 
 
@@ -297,10 +354,14 @@ def verificar_con_modelo(texto: str, notas: list[Nota], ruta_skill: str = ARCHIV
                          carpeta: str = CARPETA_PROYECTO) -> list[str]:
     """Chequeo con modelo. Devuelve la lista de problemas. Levanta ErrorResumen si `claude` falla."""
     instrucciones = resumen.leer_instrucciones(ruta_skill)
-    lista = "\n".join(
-        f"- {' '.join(nota['titulo'].split())} ({nota['medio']}). Link: {nota['link']}"
-        for nota in notas
-    )
+    lineas = []
+    for nota in notas:
+        linea = f"- {' '.join(nota['titulo'].split())} ({nota['medio']}). Link: {nota['link']}"
+        bajada = " ".join((nota.get("bajada") or "").split())
+        if bajada:
+            linea += f"\n  Bajada: {bajada}"
+        lineas.append(linea)
+    lista = "\n".join(lineas)
     pedido = (
         instrucciones
         + "\n\n## Resumen a revisar\n\n" + texto
@@ -312,10 +373,11 @@ def verificar_con_modelo(texto: str, notas: list[Nota], ruta_skill: str = ARCHIV
 # --- Ciclo de revisión -------------------------------------------------------
 
 def revisar(redactar: Callable[[list[str] | None, str | None], str], notas: list[Nota], tope: int,
-            palabras_indicadores: int, previos: list[str] | None = None,
+            previos: list[str] | None = None,
             verificar_modelo: Callable[[str], list[str]] | None = None,
             minimo: int = MINIMO_PALABRAS, maximo: int = MAXIMO_PALABRAS,
-            reintentos: int = REINTENTOS) -> Revision:
+            reintentos: int = REINTENTOS, plan: list[CupoSeccion] | None = None,
+            plan_completo: bool = True, pedidas: list[str] | None = None) -> Revision:
     """Redacta, revisa y reintenta. Devuelve {"texto": ..., "chequeo": {...}}.
 
     `redactar(correcciones, borrador)` devuelve un texto; en el primer intento
@@ -324,6 +386,9 @@ def revisar(redactar: Callable[[list[str] | None, str | None], str], notas: list
     `verificar_modelo(texto)` devuelve la lista de problemas del modelo; si es
     None no se hace el chequeo con modelo. Si levanta ErrorResumen, no se
     reintenta la redacción: queda como "no se pudo revisar" en el aviso.
+
+    `plan`, `plan_completo` y `pedidas` (spec 40) son el plan de secciones del día y los links de las
+    notas [pedido]; sin ellos no se hacen los chequeos "Secciones del plan" y "Pedido".
 
     `chequeo` tiene: aprobado, intentos, verificado (lo que pasó en el último
     intento), no_cumple (lo que falló) y omitido (lo que no se pudo chequear).
@@ -334,7 +399,8 @@ def revisar(redactar: Callable[[list[str] | None, str | None], str], notas: list
     while True:
         intentos += 1
         texto = redactar(correcciones, borrador)
-        chequeos = _chequear_codigo(texto, notas, tope, palabras_indicadores, previos, minimo, maximo)
+        chequeos = _chequear_codigo(texto, notas, tope, previos, minimo, maximo,
+                                    plan, plan_completo, pedidas)
         errores = [error for chequeo in chequeos for error in chequeo["errores"]]
         omitidos = [chequeo["detalle"] for chequeo in chequeos if chequeo.get("omitido")]
         verificados = [chequeo["detalle"] for chequeo in chequeos if not chequeo["errores"] and not chequeo.get("omitido")]
@@ -351,7 +417,7 @@ def revisar(redactar: Callable[[list[str] | None, str | None], str], notas: list
                 if problemas:
                     errores.extend(problemas)
                 else:
-                    verificados.append("Contenido: cada nota respaldada por su título y medio.")
+                    verificados.append("Contenido: cada nota respaldada por su título, bajada y medio.")
 
         if not errores:
             return _resultado(texto, True, intentos, verificados, [], omitidos)

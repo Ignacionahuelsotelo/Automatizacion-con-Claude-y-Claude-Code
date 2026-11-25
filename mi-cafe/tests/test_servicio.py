@@ -56,7 +56,7 @@ class ServicioDePrueba(unittest.TestCase):
             self.addCleanup(parche.stop)
 
     def elegir(self, indicadores):
-        servicio.guardar_preferencias({"indicadores": indicadores, "temas": []})
+        servicio.guardar_preferencias({"indicadores": indicadores, "temas": ["Deportes"]})
 
 
 class PrepararResumen(ServicioDePrueba):
@@ -70,6 +70,27 @@ class PrepararResumen(ServicioDePrueba):
         notas = servicio.ultimo_resumen()["notas"]
         self.assertEqual([n["link"] for n in notas], [n["link"] for n in NOTAS[:3]])
         self.assertTrue(all(n["titulo"] and n["seccion"] == "Política" for n in notas))
+
+    def test_las_prioridades_aprendidas_van_a_claude_sin_titulos_ni_votos_en_el_log(self):
+        votado = "Medio votado"
+        with open(os.path.join(self.datos, "gustos.json"), "w", encoding="utf-8") as archivo:
+            json.dump({"votos": [{"tipo": "nota", "clave": "https://x.test/v", "voto": "me_gusta",
+                                  "titulo": "Titulo secreto", "medio": votado, "seccion": "Política",
+                                  "votado_en": "2026-11-17T10:00:00-03:00"}]}, archivo)
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()) as generar, \
+                self.assertLogs("micafe", level="INFO") as registro:
+            servicio.preparar_resumen(utiles.MIERCOLES)
+        lineas = generar.call_args.kwargs["prioridades"]
+        self.assertIn(f"- Te interesan las notas de {votado}.", lineas)
+        self.assertNotIn("gustos", generar.call_args.kwargs)
+        salida = "\n".join(registro.output)
+        for privado in ("Titulo secreto", votado, "secreto"):
+            self.assertNotIn(privado, salida)
+
+    def test_sin_votos_no_hay_prioridades(self):
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()) as generar:
+            servicio.preparar_resumen(utiles.MIERCOLES)
+        self.assertEqual(generar.call_args.kwargs["prioridades"], [])
 
     def test_de_punta_a_punta_guarda_y_devuelve_avisos_e_indicadores_con_acciones(self):
         self.elegir(["dolar", "acciones"])
@@ -126,13 +147,42 @@ class PedidoDeNoticias(ServicioDePrueba):
 
     def test_el_pedido_va_a_cada_redaccion_incluidos_los_reintentos_y_no_al_corrector(self):
         malo = _texto(palabras=100)
-        with mock.patch.object(servicio.resumen, "generar", side_effect=[malo, _texto()]) as generar:
+        bueno = _texto(notas=[NOTAS[1], NOTAS[4], NOTAS[2]])  # incluye las 2 notas que encajan con el pedido
+        with mock.patch.object(servicio.resumen, "generar", side_effect=[malo, bueno]) as generar:
             servicio.preparar_resumen(utiles.MIERCOLES, pedido="más economía")
         self.assertEqual([c.kwargs["pedido"] for c in generar.call_args_list], ["más economía"] * 2)
         verificar = self.acciones_mock["verificar_con_modelo"]
         self.assertTrue(verificar.called)
         for llamada in verificar.call_args_list:
             self.assertNotIn("más economía", repr(llamada))
+
+    def test_el_pedido_llega_a_la_seleccion_y_pedido_sin_notas_queda_en_el_resumen(self):
+        # NOTAS del corrector: "Los bancos ajustan sus tasas de interés" encaja con "tasas".
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()) as generar:
+            con = servicio.preparar_resumen(utiles.MIERCOLES, pedido="tasas")
+        self.assertFalse(con["resumen"]["pedido_sin_notas"])
+        self.assertEqual(servicio.ultimo_resumen()["pedido_sin_notas"], False)
+        self.assertEqual(list(generar.call_args.kwargs["pedidas"]), ["https://ambito.test/2"])
+        self.assertEqual(generar.call_args.args[0][0]["link"], "https://ambito.test/2")  # primera
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()):
+            sin = servicio.preparar_resumen(utiles.MIERCOLES, pedido="ajedrez")
+        self.assertTrue(sin["resumen"]["pedido_sin_notas"])
+        self.assertTrue(servicio.ultimo_resumen()["pedido_sin_notas"])
+
+    def test_sin_pedido_pedido_sin_notas_es_false(self):
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()) as generar:
+            salida = servicio.preparar_resumen(utiles.MIERCOLES)
+        self.assertFalse(salida["resumen"]["pedido_sin_notas"])
+        self.assertEqual(generar.call_args.kwargs["pedidas"], {})
+
+    def test_el_log_no_trae_el_pedido_ni_sus_terminos_ni_sinonimos(self):
+        with self.assertLogs("micafe", level="DEBUG") as registro, \
+                mock.patch.object(servicio.resumen, "generar", return_value=_texto()):
+            servicio.preparar_resumen(utiles.MIERCOLES, pedido="fútbol argentino ZORROPLATEADO")
+        salida = "\n".join(registro.output).lower()
+        for prohibido in ("zorroplateado", "futbol", "fútbol", "river", "boca"):
+            self.assertNotIn(prohibido, salida)
+        self.assertIn("encajaron 0 notas", salida)
 
     def test_el_corrector_no_recibe_el_pedido(self):
         with mock.patch.object(servicio.resumen, "generar", return_value=_texto()), \
@@ -383,3 +433,84 @@ class OtrasOperaciones(ServicioDePrueba):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlanDeSecciones(ServicioDePrueba):
+    def setUp(self):
+        super().setUp()
+        self.elegir(["dolar"])
+        servicio.guardar_preferencias({"indicadores": ["dolar"], "temas": ["Política"]})
+        notas = [dict(n, seccion="Política") for n in NOTAS[:3]]
+        parche = mock.patch.object(servicio.noticias, "obtener", side_effect=lambda temas: {**_noticias(), "notas": notas})
+        parche.start()
+        self.addCleanup(parche.stop)
+
+    def test_el_plan_va_al_prompt_y_se_guarda_en_el_resumen(self):
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()) as generar:
+            salida = servicio.preparar_resumen(utiles.MIERCOLES)
+        self.assertEqual(generar.call_args.kwargs["plan"][0]["seccion"], "Política")
+        plan = salida["resumen"]["plan"]
+        self.assertEqual(plan["secciones"][0]["cupo"], 3)
+        self.assertFalse(plan["completo"])  # 3 notas posibles, menos que el objetivo
+        with open(os.path.join(self.resumenes, "2026-11-18.json"), encoding="utf-8") as archivo:
+            self.assertEqual(json.load(archivo)["plan"], plan)
+
+    def test_un_resumen_viejo_sin_plan_se_abre(self):
+        os.makedirs(self.resumenes)
+        with open(os.path.join(self.resumenes, "2026-11-10.json"), "w", encoding="utf-8") as archivo:
+            json.dump({"fecha": "2026-11-10", "generado_en": "x", "indicadores": [], "texto": "Un texto", "chequeo": {}}, archivo)
+        self.assertNotIn("plan", servicio.ultimo_resumen())
+
+
+class PreferenciasV2EnElServicio(ServicioDePrueba):
+    def setUp(self):
+        super().setUp()
+        self.notas = [dict(NOTAS[0], titulo="Boca gana", seccion="Deportes", medio="Perfil", link="https://perfil.test/1"),
+                      dict(NOTAS[1], titulo="Racing gana", seccion="Deportes", medio="Infobae", link="https://infobae.test/2"),
+                      dict(NOTAS[2], titulo="Se juega la fecha", seccion="Deportes", medio="Olé", link="https://ole.test/3")]
+        parche = mock.patch.object(servicio.noticias, "obtener", side_effect=lambda temas: {**_noticias(), "notas": self.notas})
+        self.obtener = parche.start()
+        self.addCleanup(parche.stop)
+
+    def guardar(self, **cambios):
+        cuerpo = {"version": 2, "temas": {"Deportes": {"activo": True, "prioridad": "normal"}}, "indicadores": ["dolar"],
+                  "medios": {"preferidos": [], "excluidos": []}, "palabras": {"seguir": [], "evitar": []}}
+        cuerpo.update(cambios)
+        _, errores = servicio.guardar_preferencias(cuerpo)
+        self.assertEqual(errores, [])
+
+    def test_noticias_de_ayer_recibe_los_temas_activos_y_no_trae_medios_excluidos(self):
+        self.guardar(medios={"preferidos": ["Olé"], "excluidos": ["Perfil"]})
+        notas = servicio.obtener_noticias()["notas"]
+        self.assertEqual([n["link"] for n in notas][0], "https://ole.test/3")  # medio preferido primero
+        self.assertNotIn("https://perfil.test/1", [n["link"] for n in notas])
+        self.assertIn("medio preferido", notas[0]["motivos"])
+        self.assertEqual(self.obtener.call_args.args[0], ["Deportes"])
+
+    def test_el_armado_usa_las_preferencias_sin_perder_el_pedido_ni_loguear_palabras(self):
+        self.guardar(medios={"preferidos": [], "excluidos": ["Perfil"]}, palabras={"seguir": ["Racing"], "evitar": ["SecretoEvitar"]},
+                     temas={"Deportes": {"activo": True, "prioridad": "alta"}})
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()) as generar, \
+                self.assertLogs("micafe", level="INFO") as registro:
+            servicio.preparar_resumen(utiles.MIERCOLES)
+        enviadas = [n["link"] for n in generar.call_args.args[0]]
+        self.assertEqual(enviadas, ["https://infobae.test/2", "https://ole.test/3"])
+        self.assertEqual(generar.call_args.kwargs["preferencias"]["palabras"]["seguir"], ["Racing"])
+        self.assertEqual(generar.call_args.kwargs["plan"][0]["prioridad"], "alta")
+        salida = "\n".join(registro.output)
+        for privado in ("Racing", "SecretoEvitar", "perfil.test"):
+            self.assertNotIn(privado, salida)
+        self.assertIn("1 palabras a seguir", salida)  # solo cantidades
+
+    def test_un_pedido_que_solo_encaja_con_un_medio_excluido_queda_sin_notas(self):
+        self.guardar(medios={"preferidos": [], "excluidos": ["Perfil"]})
+        with mock.patch.object(servicio.resumen, "generar", return_value=_texto()):
+            salida = servicio.preparar_resumen(utiles.MIERCOLES, pedido="Boca")
+        self.assertTrue(salida["resumen"]["pedido_sin_notas"])
+
+    def test_opciones_completas(self):
+        opciones = servicio.opciones_de_preferencias()
+        self.assertEqual(opciones["prioridades"], ["alta", "normal", "baja"])
+        self.assertEqual(opciones["secciones"], list(servicio.TEMAS))
+        self.assertIn("Tenis", opciones["subtemas"])
+        self.assertNotIn("temas", opciones)

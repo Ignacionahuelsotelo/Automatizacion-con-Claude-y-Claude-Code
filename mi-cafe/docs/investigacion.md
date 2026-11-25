@@ -1,12 +1,12 @@
 # Mi Café: cómo armar un resumen de noticias argentinas que se lea en 3 minutos (noviembre 2026)
 
-Para que Mi Café funcione, separá los números de las noticias. Los indicadores tienen que salir de APIs, no de lo que escriba la IA: DolarApi para el dólar, ArgentinaDatos para el riesgo país y la inflación, el BCRA para las reservas, Rava para el MSCI Merval y data912 para las acciones. Las noticias, de los RSS de medios gratuitos y bien calificados (Infobae, Página/12, Ámbito, Olé, elDiarioAR, y TN y La Nación como contraste). Todo tiene que entrar en unas 600 palabras: un bloque de indicadores y 8 o 9 noticias de 50 a 60 palabras, cada una con su enlace y su fecha.
+Para que Mi Café funcione, separá los números de las noticias. Los indicadores tienen que salir de APIs, no de lo que escriba la IA: DolarApi para el dólar, ArgentinaDatos para el riesgo país y la inflación, el BCRA para las reservas, Rava para el MSCI Merval y data912 para las acciones. Las noticias, de los RSS de medios gratuitos y bien calificados (Infobae, Página/12, Ámbito, Olé, elDiarioAR, y TN y La Nación como contraste). El resumen tiene unas 600 palabras de notas (8 o 9 noticias de 50 a 60 palabras, cada una con su enlace y su fecha); los indicadores se muestran aparte y no cuentan en ese largo (decisión de la spec 46, que reemplaza a la del 11/11/2026).
 
 ## TL;DR
 
 - **Fuentes:** el eje gratuito y con RSS es Infobae, Página/12, Ámbito, Olé y elDiarioAR. Clarín (647.000 suscriptores digitales) y La Nación (386.000), según el Digital News Report 2026, tienen muro de pago medido: sirven para contrastar, pero no conviene que sean el único enlace de una nota. Según el Digital News Report 2026 del Reuters Institute, la confianza en "las noticias en general" en Argentina cayó al 26%, aunque TN (55%), Infobae (53%) y La Nación (50%) siguen por encima del 50% de confianza como marcas.
-- **Indicadores:** DolarApi (sin clave) para oficial, blue, MEP, CCL, mayorista, tarjeta y cripto; ArgentinaDatos para riesgo país, inflación e históricos; BCRA v4.0 (sin clave) para reservas; la API de Series de Tiempo de datos.gob.ar o la del INDEC para el IPC; Rava (cierre diario) para el Merval y data912 para las acciones (sin respaldo para el índice: ver Caveats). El índice, desde el 19 de octubre de 2026, se llama **MSCI Merval** (ticker MMSCI).
-- **Formato y controles:** en español se leen 218 palabras por minuto según el estudio IReST (Trauzettel-Klosinski y Dietz, 2012), así que 3 minutos equivalen a unas 650 palabras. Hay que apuntar a 550–650. Según el estudio de la EBU y la BBC, el 45% de las respuestas de los asistentes de IA sobre noticias tuvo al menos un problema significativo. Por eso: ningún número que no venga de una API con fecha, enlace obligatorio en cada nota, filtro por fecha de publicación y un agente "corrector" antes de publicar.
+- **Indicadores:** DolarApi (sin clave) para oficial, blue, MEP, CCL, mayorista, tarjeta y cripto; ArgentinaDatos para riesgo país, inflación mensual e interanual y UVA; BCRA v4.0 (sin clave) para reservas, tasas (BADLAR, TAMAR, plazo fijo a 30 días) y A3500; la API de Series de Tiempo de datos.gob.ar o la del INDEC quedan como respaldo posible del IPC (no se usan); Rava (cierre diario) para el Merval y data912 para las acciones (sin respaldo para el índice: ver Caveats). El índice, desde el 19 de octubre de 2026, se llama **MSCI Merval** (ticker MMSCI).
+- **Formato y controles:** en español se leen 218 palabras por minuto según el estudio IReST (Trauzettel-Klosinski y Dietz, 2012), así que 3 minutos equivalen a unas 650 palabras. Hay que apuntar a 550–650 palabras de notas (sin contar los indicadores). Según el estudio de la EBU y la BBC, el 45% de las respuestas de los asistentes de IA sobre noticias tuvo al menos un problema significativo. Por eso: ningún número que no venga de una API con fecha, enlace obligatorio en cada nota, filtro por fecha de publicación y un agente "corrector" antes de publicar.
 
 ## Key Findings
 
@@ -21,21 +21,42 @@ Para que Mi Café funcione, separá los números de las noticias. Los indicadore
 | Infobae | Gratis | https://www.infobae.com/arc/outboundfeeds/rss/ (feed con artículos completos; unas 1.144 publicaciones por día). Por sección: /arc/outboundfeeds/rss/category/{sección}/ | Fuente base para política, economía, internacional y tecnología |
 | Página/12 | Gratis | Página oficial de feeds: …/arc/outboundfeeds/rss/portada, /secciones/el-pais/notas, /secciones/economia/notas, /secciones/el-mundo/notas | Contraste editorial en política y economía |
 | Ámbito | Gratis (según el directorio Inkline) | https://www.ambito.com/rss/ultimas-noticias.xml, /rss/home.xml, /rss/economia.xml, /rss/pages/finanzas.xml. Probados el 18/11/2026 y en uso: /rss/politica.xml, /rss/mundo.xml, /rss/pages/deportes.xml, /rss/tecnologia.xml. Sin sección (no se usan): ultimas-noticias (0 de ayer) y home | Economía y mercados; también política, internacional, deportes y tecnología |
-| elDiarioAR | Gratis | https://www.eldiarioar.com/rss/ | Política y sociedad |
-| Olé | Acceso no confirmado (puede tener algún tipo de restricción) | https://www.ole.com.ar/rss/ultimas-noticias/ (unas 73 publicaciones por día; hay feeds por club) | Deportes |
+| elDiarioAR | Gratis | Probado el 24/11/2026: /rss/ (general, 91 ítems) **no trae `<category>`**: se sacó de Política. En uso: /rss/politica/ (20 ítems) y /rss/sociedad/ (20 ítems, 5 de ayer). /rss/ciencia/ anda pero está desactualizado (último ítem del 15/11/2026); /rss/policiales/ y /rss/salud/ dan 404 | Política y Sociedad |
+| Olé | Acceso no confirmado (puede tener algún tipo de restricción) | https://www.ole.com.ar/rss/{futbol-primera,futbol-internacional,tenis,basquet}/ (10 ítems cada uno; probados el 24/11/2026, ver abajo). `ultimas-noticias/` ya no se usa: 0 de ayer | Deportes |
 | Clarín | Muro de pago medido con registro. Al lanzarlo, en 2017, daba 10 notas gratis más 30 con registro; hoy el conteo es dinámico | https://www.clarin.com/rss/lo-ultimo/, /rss/politica/, /rss/mundo/, /rss/economia/ (solo resúmenes) | Para detectar temas; evitar que sea el único enlace |
 | La Nación | Muro de pago medido que se ajusta al lector | https://www.lanacion.com.ar/arc/outboundfeeds/rss/?outputType=xml (unas 256 publicaciones por día) | Para detectar temas y contrastar |
 | Perfil | Gratis | Probado el 18/11/2026: https://www.perfil.com/feed/{internacional,deportes,tecnologia} (50 ítems, pubDate en GMT). En uso | Internacional, Deportes y Tecnología |
 | iProfesional | Gratis | Probado el 18/11/2026: https://www.iprofesional.com/rss/{politica,tecnologia} (22 y 18 ítems). /rss/economia anda pero con 0 notas de ayer; /rss/internacional da 404. En uso: política y tecnología | Tecnología y política |
 | El Cronista | Muro medido | Probado el 18/11/2026: https://www.cronista.com/arc/outboundfeeds/rss/category/economia-politica/?outputType=xml (48 ítems, 21 de ayer). La categoría tecnología trae 0 ítems. En uso | Economía, como contraste |
 | TN | Gratis | Probado el 18/11/2026: https://tn.com.ar/rss.xml (100 ítems) trae `pubDate` en ISO 8601 (no RFC 822) y no hay feeds por sección: **no se usa** (la lectura exige fecha RFC 822 y no se tocó) | Descartado |
-| Chequeado | Gratis | Sin sección de las cinco: no se probó | Verificar datos |
+| Chequeado | Gratis | No encaja en ningún tema de `config.TEMAS`: no se probó | Verificar datos |
+
+**Feeds de la spec 44 (probados el 24/11/2026 con `curl -s -m 15 -A "MiCafe/1.0"`; "ayer" = cuántos ítems caen el 23/11/2026).** Todos son RSS válidos (`<channel>`) con `pubDate` con zona y link https.
+
+| Feed | Resultado | Decisión |
+|---|---|---|
+| Infobae `category/sociedad/` | 100 ítems, 19 de ayer | En uso (Sociedad) |
+| elDiarioAR `/rss/sociedad/` | 20 ítems, 5 de ayer | En uso (Sociedad) |
+| Página/12 `secciones/sociedad/notas/` | 25 ítems, 1 de ayer (el feed rota rápido) | En uso (Sociedad) |
+| Infobae `category/salud/` | 100 ítems, 17 de ayer | En uso (Salud y Ciencia) |
+| iProfesional `/rss/salud` | 20 ítems, 0 de ayer pero con notas del 24, 22 y 21/11 (poco volumen) | En uso (Salud y Ciencia) |
+| Infobae `category/teleshow/` y `category/cultura/` | 100 ítems cada uno, 28 y 13 de ayer | En uso (Espectáculos y Cultura) |
+| Página/12 `secciones/cultura-y-espectaculos/notas/` | 25 ítems, 9 de ayer | En uso (Espectáculos y Cultura) |
+| Ámbito `/rss/pages/espectaculos.xml` | 100 ítems, 4 de ayer | En uso (Espectáculos y Cultura) |
+| Infobae `category/sociedad/policiales/` | 100 ítems, 9 de ayer | Anda, pero es el único medio con policiales: **no se usa** y Policiales queda fuera de `TEMAS` |
+| Infobae `category/{policiales,ciencia,espectaculos}/`, Página/12 `secciones/{cultura,espectaculos,salud,policiales}/notas/` | 0 ítems | Descartados |
+| Página/12 `secciones/ciencia/notas/` | 25 ítems, el más nuevo de junio de 2026 | Descartado (desactualizado) |
+| Perfil `/feed/{sociedad,policia,espectaculos,ciencia,salud}` | 404 | Descartados |
+| Perfil `/feed/cultura`, `/feed/seguridad` | RSS válido, pero el más nuevo es del 22/11 y del 12/11/2026 | Descartados (sin notas en la ventana) |
+| Ámbito `/rss/pages/{sociedad,policiales,salud,ciencia,cultura}.xml` | 200 con cuerpo vacío | Descartados |
+| iProfesional `/rss/{sociedad,policiales,espectaculos,ciencia,cultura}` | 404 | Descartados |
+| El Cronista `category/{sociedad,espectaculos}/` | RSS sin ítems | Descartados |
 
 **Prioridad por sección:**
 - **Política:** Infobae y elDiarioAR, con Página/12 o La Nación como contraste según el tema.
 - **Economía:** Ámbito e Infobae, con Página/12 (incluido el suplemento Cash) como contraste. Las cifras salen siempre de las APIs.
-- **Deportes:** Olé y la sección deportes de Infobae.
-- **Tecnología:** la categoría tecnología de Infobae e iProfesional. Ningún medio argentino se destaca claramente en esta sección.
+- **Deportes:** Olé (por deporte, con subtemas), Infobae, Ámbito y Perfil.
+- **Tecnología:** Ámbito, Perfil e iProfesional (el feed de tecnología de Infobae hoy no trae ítems). Ningún medio argentino se destaca claramente en esta sección.
 - **Internacional:** "El Mundo" de Página/12, Infobae y "Mundo" de Clarín (solo para detectar temas).
 
 Un detalle: **Télam ya no existe como agencia de noticias**. El Decreto 548/2024 la convirtió en una empresa de publicidad (APE S.A.U.), así que cualquier "fuente Télam" posterior a 2024 es sospechosa.
@@ -48,10 +69,37 @@ Un detalle: **Télam ya no existe como agencia de noticias**. El Decreto 548/202
 | Histórico del dólar, riesgo país, inflación mensual e interanual, UVA | **ArgentinaDatos**: /v1/finanzas/indices/riesgo-pais/ultimo, /inflacion, /inflacionInteranual | Serie con `fecha` y `valor` | Riesgo país diario (EMBI de J.P. Morgan); inflación mensual (INDEC) | Sin límite numérico, pero pide "una consulta cada 3 horas y por serie", guardar una copia local y citar "ArgentinaDatos https://argentinadatos.com" |
 | Reservas internacionales, tipo de cambio mayorista A3500, tasas (TAMAR, BADLAR), base monetaria | **BCRA, Estadísticas Monetarias v4.0**: api.bcra.gob.ar/estadisticas/v4.0/monetarias/1 (1 = reservas) | Serie diaria en millones de USD (cifras provisorias) | Diaria, días hábiles. La hora de publicación no está documentada: hay que leer `ultFechaInformada` | Sin autenticación, control de tráfico por IP, máximo 3.000 filas por consulta. **La v3 se dio de baja el 28/02/2026**, así que hay que usar v4.0 |
 | IPC (nivel general y núcleo), EMAE, tipo de cambio BNA | **API de Series de Tiempo**: apis.datos.gob.ar/series (IPC: 148.3_INIVELNAL_DICI_M_26). También existe una API propia del INDEC, lanzada en noviembre de 2026 y todavía en beta | Series con transformaciones (`percent_change`, `percent_change_a_year_ago`) | Mensual, según el calendario del INDEC | Cuotas por IP: 60 por segundo, 2.000 por minuto, 40.000 por hora y 200.000 por día; máximo 1.000 filas |
+
 | MSCI Merval (cierre diario) | **Rava, histórico por fecha**: https://www.rava.com/cotizaciones/historico/merval/AAAA/MM/DD/ (ej. /2026/11/17/) | El HTML trae un bloque JSON-LD (FAQPage) con el cierre, la variación %, el mínimo y el máximo del día. Ej.: "El MERVAL cerro a 81.794 el 17 de noviembre de 2026… suba del 0,4%" | Un cierre por día hábil; el día en curso da 404 hasta que cierra la rueda (y los fines de semana/feriados también: hay que retroceder hasta el último día con página) | Gratis, sin clave, `robots.txt` abierto (`Disallow:` vacío). Es scraping, no API: el formato puede cambiar. Rava lo titula "MERVAL", no "MSCI Merval": el nombre lo pone el código. El cierre se valida contra la fecha de la URL; el código retrocede hasta 7 días buscando el último día con página. Formato: "81.794 puntos". **Respaldo data912: desactivado** (ninguna ruta trae el índice, ver Caveats); si Rava falla, "sin dato". Verificado el 18/11/2026 (13/11: 85.096; 17/11: 81.794) |
 | Acciones líderes (GGAL, YPFD, PAMP, BMA…) | **data912**: https://data912.com/historical/stocks/{TICKER} (diario con `date`, `o`, `h`, `l`, `c`, `v`) y /live/arg_stocks (todas en una consulta) | Precio de cierre (`c`, en pesos) por fecha: se toma la última fila con `date` menor o igual a ayer y se formatea `$ 4.770,00`; `/live` además trae `pct_change`, puntas y volumen | Diaria. `/live` se actualiza cada ~20 s según la documentación de terceros, pero hay caché y la propia API dice que es "educativa", no tiempo real | Gratis, sin clave, sin registro; 120 consultas por minuto según una skill de terceros. API no oficial, mantenida por una persona. Verificado el 18/11/2026: GGAL 4.770, YPFD 6.040, PAMP 4.290 |
 | Respaldo de acciones | **Yahoo Finance**. **No se usa (decisión del 18/11/2026)**; los datos de la prueba quedan como antecedente (endpoint `query1.finance.yahoo.com/v8/finance/chart/GGAL.BA?interval=1d&range=5d`) | Velas diarias con timestamp, en pesos | Diaria | Antecedente: gratis, sin clave, pero no oficial: puede cortar o pedir cabeceras. Funcionaba con GGAL.BA, YPFD.BA y PAMP.BA (coinciden con data912). **No sirve para el índice**: `^MERV` quedó congelado en el valor viejo (2.848.945, sin velas) y `MMSCI.BA` trae una sola vela del día |
 | ~~BYMADATA~~ | open.bymadata.com.ar | Índices y precios | — | **Descartada**: la API oficial es comercial y el endpoint público no respondió (timeout) desde acá en dos intentos; las librerías de terceros que lo usan (PyOBD) dependen de que no cambie |
+
+### Series del BCRA v4.0 verificadas (spec 47)
+
+Probado el 24/11/2026 contra `https://api.bcra.gob.ar/estadisticas/v4.0/monetarias` (catálogo, 4.037 variables; se pagina con `limit` hasta 3.000 y `offset`) y `.../monetarias/{id}?limit=10` (devuelve `results[0].detalle` con filas `fecha` y `valor`, la más reciente primero). Sin problemas de certificado SSL. La API acepta `limit`, así que se pide solo el último tramo.
+
+| Clave en `config.BCRA_IDS` | id | Descripción exacta del catálogo | Unidad | Última fecha informada (24/11/2026) |
+|---|---|---|---|---|
+| `reservas` | 1 | Reservas internacionales | millones de USD | 19/11/2026 (49.442) |
+| `badlar` | 7 | Tasa de interés BADLAR de bancos privados | % nominal anual | 20/11/2026 (22,5) |
+| `tamar` | 44 | Tasa de interes TAMAR de bancos privados | % nominal anual | 20/11/2026 (23,75) |
+| `plazo_fijo_30` | 1207 | Tasa de interés de depósitos a plazo fijo de 30 días | % nominal anual | 20/11/2026 (21,06) |
+| `a3500` | 5 | Tipo de cambio Mayorista de Referencia | pesos por dólar | 24/11/2026 (1.592,0227) |
+
+Notas: el catálogo repite BADLAR y TAMAR con otros ids (35 y 45 son % efectivo anual; 139 y 136 repiten 7 y 44). El 5 es la serie de referencia (Com. A 3500): el catálogo no la nombra "A 3500". La tasa de plazo fijo de 30 días es en pesos (el id 1213 es la de dólares). Los ids de la v3 no se usaron.
+
+### Inflación y UVA de ArgentinaDatos verificadas (spec 48)
+
+Probado el 24/11/2026 con una consulta por ruta (la API pide como máximo una cada 3 horas por serie; la app guarda copia local y reutiliza). Las tres responden HTTP 200 con una lista de filas `{"fecha": "AAAA-MM-DD", "valor": número}`; no se confía en el orden.
+
+| Clave (config y copia local) | Ruta | Unidad | Última fila al probar |
+|---|---|---|---|
+| `inflacion` | `/v1/finanzas/indices/inflacion` | % mensual (fecha = último día del mes) | 31/10/2026 (2,2) |
+| `inflacion_interanual` | `/v1/finanzas/indices/inflacionInteranual` | % interanual | 31/10/2026 (33,1) |
+| `uva` | `/v1/finanzas/indices/uva` | pesos por UVA, diaria | 25/11/2026 (2.213,19) |
+
+Notas: la UVA existe en ArgentinaDatos, así que no se usó la del BCRA (en el catálogo v4.0 solo hay depósitos ajustables por UVA, ninguna serie del valor de la UVA). La serie de UVA trae días por adelantado (al probar, el 25/11 con hoy 24/11) y repite el último valor en fines de semana: el código descarta las fechas futuras. La inflación se muestra como mes ("octubre 2026") y se marca desactualizada cuando su mes quedó 2 meses o más atrás del mes de hoy (septiembre en noviembre sí, octubre no). Las tres series se piden en cada armado solo si "Inflación" está tildada.
 
 #### Formato y controles de acciones
 
@@ -66,6 +114,8 @@ Un detalle: **Télam ya no existe como agencia de noticias**. El Decreto 548/202
 Sobre el Merval: desde el 19 de octubre de 2026 lo calcula MSCI en lugar de S&P y se llama **MSCI Merval** (ticker MMSCI; el índice general es GMSCI). Cualquier IA entrenada antes va a decir "S&P Merval". Es un ejemplo perfecto de dato desactualizado que hay que corregir por regla.
 
 Ojo con los agregadores: distintos tableros de terceros muestran valores de riesgo país muy diferentes según la fecha y el proveedor (por ejemplo, un sitio mostraba un dato "con 26 h de antigüedad"). Por eso cada número tiene que mostrarse con su fecha.
+
+Verificado el 24/11/2026 contra https://dolarapi.com/v1/dolares: la misma respuesta trae las siete casas con las claves `oficial`, `blue`, `bolsa`, `contadoconliqui`, `mayorista`, `cripto` y `tarjeta` (cada una con `compra`, `venta` y `fechaActualizacion`). El tarjeta ya trae el recargo en la venta. Mi Café las muestra tal cual, sin una consulta más (grupo de preferencias `dolar_otros` para mayorista, tarjeta y cripto).
 
 ### 3. Formato: cómo lo hacen los newsletters matutinos
 
@@ -98,25 +148,21 @@ Evidencia: el estudio de la EBU y la BBC (octubre de 2025; 22 medios públicos, 
 
 ## Recommendations: la receta de Mi Café
 
-**Fuentes (RSS):** Infobae (general y por categoría), Página/12 (portada, el país, economía, el mundo), Ámbito (economía y finanzas), Olé (últimas noticias), elDiarioAR. Clarín y La Nación se leen por RSS solo para detectar temas; el enlace va al medio gratuito siempre que lo haya.
+**Fuentes (RSS):** los de `config.FUENTES_RSS`: Infobae por categoría, Página/12 por sección, Ámbito, Olé por deporte, elDiarioAR (política y sociedad), Perfil, iProfesional y El Cronista, leídos en paralelo (`HILOS_FEEDS`). Clarín y La Nación se leen por RSS solo para detectar temas; el enlace va al medio gratuito siempre que lo haya.
 
 **Indicadores, en este orden y con fecha:**
-1. Dólar oficial, blue, MEP y CCL, con la brecha calculada: **DolarApi** /v1/dolares.
+1. Dólar oficial, blue, MEP y CCL, con la brecha calculada, y también mayorista, tarjeta y cripto: **DolarApi** /v1/dolares (Bitcoin no entra).
 2. Riesgo país: **ArgentinaDatos** /riesgo-pais/ultimo.
 3. MSCI Merval: cierre del último día hábil desde **Rava** (página histórica por fecha, leer el JSON-LD); el respaldo en data912 está desactivado, así que si Rava falla o no trae dato válido, "sin dato". Acciones líderes (GGAL, YPFD, PAMP): **data912** `/historical/stocks/{ticker}`, tomando la última fila con `date` ≤ ayer. Sin Yahoo. Cada valor se muestra con su fecha de cierre. Si la fuente no responde o la fecha no es la del último día hábil, "sin dato".
-4. Reservas: **BCRA v4.0** (variable 1).
-5. Última inflación mensual e interanual: **ArgentinaDatos** o **Series de Tiempo** (INDEC).
+4. Reservas, tasas y A3500: **BCRA v4.0** (ids en `config.BCRA_IDS`, tabla de abajo).
+5. Última inflación mensual e interanual y UVA: **ArgentinaDatos** (`/inflacion`, `/inflacionInteranual`, `/uva`). Formatos: inflación `2,20 % mensual` o `33,10 % interanual`, mes ("octubre 2026") como fecha y desactualizada con 2 meses o más de atraso; tasas `32,50 % TNA`; UVA en pesos.
 
 Guardar una copia local diaria en datos/ y consultar cada serie como máximo una vez cada 3 horas, como pide ArgentinaDatos.
 
-**Estructura (unas 600 palabras en total):**
+**Estructura (unas 600 palabras de notas; los indicadores van aparte):**
 - Apertura: 1 frase con "lo más importante de hoy" (unas 25 palabras).
-- Indicadores: tarjetas con valor, ▲/▼, fecha y fuente (unas 60 palabras, sin prosa).
-- Política: 2 noticias.
-- Economía: 2 noticias.
-- Internacional: 2 noticias.
-- Deportes: 1–2 noticias.
-- Tecnología: 1 noticia.
+- Indicadores: tarjetas con valor, ▲/▼, fecha y fuente, que arma la página (no cuentan en el largo).
+- Notas por sección: las 8 secciones de `config.TEMAS` que la persona tilde (Política, Economía, Internacional, Sociedad, Deportes, Salud y Ciencia, Espectáculos y Cultura, Tecnología). Cuántas lleva cada una (9 notas objetivo en total) lo calcula el código (`seleccion.plan_de_secciones`) según el pedido, los gustos y la prioridad de cada tema.
 - Cada noticia: título de hasta 10 palabras, 1–2 frases (40–50 palabras), una línea de "por qué importa", y medio, fecha y enlace.
 - Cierre opcional: "Lo que viene hoy", 1 línea con agenda.
 
@@ -127,7 +173,7 @@ Guardar una copia local diaria en datos/ y consultar cada serie como máximo una
 4. Máximo 3 notas por medio y dos fuentes en temas polémicos.
 5. Deduplicación contra los últimos 3 resúmenes.
 6. Glosario de vigencia (MSCI Merval, Télam, versiones de API) y alerta si una API devuelve 410 o un dato con fecha vieja.
-7. Contar las palabras antes de guardar: si pasa de 650, recortar desde Deportes y Tecnología, nunca los indicadores.
+7. Contar las palabras antes de guardar: si pasa de 650, recortar desde las secciones de menor prioridad del plan, nunca los indicadores.
 
 ## Cobertura medida de los feeds
 
@@ -189,6 +235,23 @@ Hallazgos: Infobae Internacional e Infobae Tecnología siguen sin traer ítems (
 | iProfesional | Tecnología | 18 | 5 | 3 |
 
 Los 12 feeds anteriores dieron lo mismo (Página/12 Política pasó de 9 a 8 en ventana por el momento de la lectura). La lista de "Noticias de ayer" pasa de Política 9, Economía 9, Internacional 3, Deportes 3, Tecnología 0 (24 notas) a **Política 14, Economía 12, Internacional 9, Deportes 7, Tecnología 7 (49 notas)**, sin feeds caídos. Medios distintos con notas de ayer: Tecnología 3 (Ámbito, Perfil, iProfesional), Internacional 3 (Página/12, Ámbito, Perfil), Deportes 3 (Infobae, Ámbito, Perfil). Olé e Infobae Internacional y Tecnología siguen sin traer notas.
+
+### Feeds de Olé por deporte y subtemas de Deportes (spec 45, probado el 24/11/2026)
+
+Probados con `curl -sS -m 15 -A "MiCafe/1.0"`: todos devuelven 200 con XML válido, 10 ítems con `pubDate` en GMT (`+0000`) y link http(s); ninguno trae `<category>`.
+
+| Feed (`https://www.ole.com.ar/rss/...`) | Estado | Ítems de ayer (23/11) en esa lectura |
+|---|---|---|
+| `futbol-primera/` | entra (subtema Fútbol argentino) | 0 (los 10 ítems son de hoy) |
+| `futbol-internacional/` | entra (Fútbol internacional) | 0 (los 10 son de hoy) |
+| `tenis/` | entra (Tenis) | 2 (los 10 cubren desde el 20/11) |
+| `basquet/` | entra (Básquet) | 2 (los 10 cubren desde el 18/11) |
+| `automovilismo/` | descartado: 404 (también `motor/` y `deportes-motor/`) | - |
+| `ultimas-noticias/` | reemplazado | 0 (200 OK y fechas con zona, pero solo 10 ítems de las últimas horas) |
+
+Decisión sobre `ultimas-noticias/`: no está roto; el 0 es estructural, porque cada feed de Olé trae solo los 10 ítems más recientes y el de últimas noticias se renueva en horas, así que a la mañana siguiente ninguno es de ayer. Se reemplazó por los cuatro feeds por deporte (que cubren varios días en tenis y básquet y suman volumen en fútbol). El fútbol y el resto dependen de la hora de lectura: a la mañana, el feed de fútbol puede traer ítems de ayer. Olé queda así con feeds que traen notas (tenis y básquet con ayer en esta lectura).
+
+Subtemas (`config.SUBTEMAS`): Fútbol argentino, Fútbol internacional, Tenis, Básquet, Automovilismo y Otros. Una nota de Deportes se clasifica por el subtema de su fuente, si no por categoría del RSS, si no por palabras clave en título y bajada, y si no queda en "Otros". Las palabras clave son un conjunto inicial a validar con datos reales.
 
 ## Caveats
 

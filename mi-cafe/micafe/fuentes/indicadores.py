@@ -1,4 +1,4 @@
-"""Indicadores de Mi Café: dólares, riesgo país y reservas.
+"""Indicadores de Mi Café: dólares, riesgo país, acciones, reservas y tasas.
 
 Los números salen de las APIs; el modelo nunca los escribe (regla de CLAUDE.md:
 "ningún número sin fuente y fecha"; si no hay dato confiable, "sin dato"). Cada valor lleva
@@ -24,7 +24,8 @@ from datetime import datetime, timedelta
 
 from micafe.config import (
     AGENTE, FUENTE_ARGENTINADATOS, FUENTE_BCRA, FUENTE_DOLARAPI, HORAS_ENTRE_CONSULTAS,
-    TIMEOUT_INDICADORES, URL_DOLARAPI, URL_RESERVAS, URL_RIESGO_PAIS, ZONA,
+    BCRA_IDS, TIMEOUT_INDICADORES, URL_BCRA_VARIABLE, URL_DOLARAPI, URL_INFLACION,
+    URL_INFLACION_INTERANUAL, URL_RIESGO_PAIS, URL_UVA, ZONA,
 )
 from micafe.fuentes import utilidades
 from micafe.modelos import ResultadoIndicadores
@@ -38,6 +39,20 @@ COTIZACIONES = [
     ("bolsa", "Dólar MEP"),
     ("contadoconliqui", "Dólar CCL"),
 ]
+# Otras casas de la misma respuesta de DolarApi (spec 46): van en su propio grupo de preferencias.
+COTIZACIONES_OTROS = [
+    ("mayorista", "Dólar mayorista"),
+    ("tarjeta", "Dólar tarjeta"),
+    ("cripto", "Dólar cripto"),
+]
+# Tasas del BCRA (clave de config.BCRA_IDS -> nombre para mostrar), grupo "tasas" (spec 47).
+TASAS = [
+    ("badlar", "BADLAR (bancos privados)"),
+    ("tamar", "TAMAR (bancos privados)"),
+    ("plazo_fijo_30", "Plazo fijo a 30 días"),
+]
+# Inflación y UVA de ArgentinaDatos (spec 48): (clave y de la copia local, url, nombre, formato).
+CLAVES_MENSUALES = ("inflacion", "inflacion_interanual")  # su fecha es un mes, no un día
 # Brechas: cada cotización contra el oficial (calculadas acá, no por el modelo).
 BRECHAS = [
     ("blue", "Brecha blue vs. oficial"),
@@ -50,8 +65,8 @@ def obtener(ruta_copia: str, elegidos: list[str], ahora: datetime | None = None)
     """Devuelve {"indicadores": [...], "generado_en": "...", "avisos": [...]}.
 
     `elegidos` son las preferencias de indicadores ("dolar", "riesgo_pais",
-    "acciones"). Reservas no tiene preferencia propia en la lista de la spec 02,
-    así que se trae siempre. `avisos` son frases en español para la página: una
+    "reservas", "tasas", "dolar_otros", "inflacion", "acciones"); solo se consulta lo elegido.
+    `avisos` son frases en español para la página: una
     por cada fuente que falló y una por cada dato con fecha vieja.
     """
     ahora = ahora or datetime.now(ZONA)
@@ -60,16 +75,33 @@ def obtener(ruta_copia: str, elegidos: list[str], ahora: datetime | None = None)
     avisos = []
 
     indicadores = []
-    if "dolar" in elegidos:
-        indicadores += _dolares(copia, ahora, hoy, avisos)
+    if "dolar" in elegidos or "dolar_otros" in elegidos:
+        indicadores += _dolares(copia, ahora, hoy, avisos, "dolar" in elegidos, "dolar_otros" in elegidos)
     if "riesgo_pais" in elegidos:
         indicadores.append(_riesgo_pais(copia, ahora, hoy, avisos))
-    indicadores.append(_reservas(copia, ahora, hoy, avisos))
+    avisos_bcra: list[str] = []
+    if "reservas" in elegidos:
+        indicadores.append(_serie_bcra(copia, ahora, hoy, avisos_bcra, "reservas", "reservas",
+                                       "Reservas internacionales (cifra provisoria)", _texto_reservas))
+    if "tasas" in elegidos:
+        for clave, nombre in TASAS:
+            indicadores.append(_serie_bcra(copia, ahora, hoy, avisos_bcra, clave, "tasas", nombre, _texto_tasa))
+    if "dolar_otros" in elegidos:
+        indicadores.append(_serie_bcra(copia, ahora, hoy, avisos_bcra, "a3500", "dolar_otros",
+                                       "Dólar A3500 (referencia BCRA)", utilidades.monto, "dolar_a3500"))
+    if avisos_bcra:
+        avisos.append(avisos_bcra[0])  # un solo aviso por fuente, aunque fallen varias series
+    if "inflacion" in elegidos:
+        avisos_inflacion: list[str] = []
+        indicadores += _inflacion_y_uva(copia, ahora, hoy, avisos_inflacion)
+        if avisos_inflacion:
+            avisos.append(avisos_inflacion[0])  # un solo aviso de ArgentinaDatos para las tres series
 
     for indicador in indicadores:
         if indicador["desactualizado"]:
+            articulo = "de" if indicador["clave"] in CLAVES_MENSUALES else "del"  # "de octubre 2026" / "del 17/11/2026"
             avisos.append(
-                f"{indicador['nombre']}: el dato es del {indicador['fecha']} y está desactualizado."
+                f"{indicador['nombre']}: el dato es {articulo} {indicador['fecha']} y está desactualizado."
             )
 
     utilidades.guardar_copia(ruta_copia, copia)
@@ -82,20 +114,28 @@ def obtener(ruta_copia: str, elegidos: list[str], ahora: datetime | None = None)
 
 # --- Indicadores -----------------------------------------------------------
 
-def _dolares(copia, ahora, hoy, avisos):
+def _dolares(copia, ahora, hoy, avisos, con_dolar=True, con_otros=False):
     respuesta = _respuesta(copia, "dolares", URL_DOLARAPI, ahora, False, "DolarApi", avisos)
     cotis = _cotizaciones(respuesta)
     items = []
 
-    for casa, nombre in COTIZACIONES:
-        cot = cotis.get(casa)
-        if cot is None:
-            items.append(_indicador(f"dolar_{casa}", "dolar", nombre, FUENTE_DOLARAPI, None, None, hoy))
-            continue
-        texto = (f"venta {utilidades.monto(cot['venta'])} (compra {utilidades.monto(cot['compra'])})")
-        items.append(_indicador(f"dolar_{casa}", "dolar", nombre, FUENTE_DOLARAPI,
-                                texto, cot["momento"], hoy))
+    grupos = ([("dolar", COTIZACIONES)] if con_dolar else []) + ([("dolar_otros", COTIZACIONES_OTROS)] if con_otros else [])
+    for grupo, casas in grupos:
+        for casa, nombre in casas:
+            cot = cotis.get(casa)
+            if cot is None:
+                items.append(_indicador(f"dolar_{casa}", grupo, nombre, FUENTE_DOLARAPI, None, None, hoy))
+                continue
+            texto = (f"venta {utilidades.monto(cot['venta'])} (compra {utilidades.monto(cot['compra'])})")
+            items.append(_indicador(f"dolar_{casa}", grupo, nombre, FUENTE_DOLARAPI,
+                                    texto, cot["momento"], hoy))
+        if grupo == "dolar":
+            items += _brechas(cotis, hoy)
+    return items
 
+
+def _brechas(cotis, hoy):
+    items = []
     oficial = cotis.get("oficial")
     for casa, nombre in BRECHAS:
         cot = cotis.get(casa)
@@ -121,20 +161,66 @@ def _riesgo_pais(copia, ahora, hoy, avisos):
                       texto, fecha, hoy)
 
 
-def _reservas(copia, ahora, hoy, avisos):
-    respuesta = _respuesta(copia, "reservas", URL_RESERVAS, ahora, False, "BCRA", avisos)
-    valor, fecha = _reservas_ultimo(respuesta)
-    texto = f"US$ {utilidades.formatear_numero(valor, 2)} millones" if valor is not None else None
-    return _indicador("reservas", "reservas", "Reservas internacionales (cifra provisoria)",
-                      FUENTE_BCRA, texto, fecha, hoy)
+def _texto_reservas(valor):
+    return f"US$ {utilidades.formatear_numero(valor, 2)} millones"
 
 
-def _indicador(clave, grupo, nombre, fuente, texto, momento, hoy):
-    """Arma un indicador. Sin texto o sin fecha, es "sin dato"."""
+def _texto_tasa(valor):
+    return f"{utilidades.formatear_numero(valor, 2)} % TNA"
+
+
+def _texto_inflacion_mensual(valor):
+    return f"{utilidades.formatear_numero(valor, 2)} % mensual"
+
+
+def _texto_inflacion_interanual(valor):
+    return f"{utilidades.formatear_numero(valor, 2)} % interanual"
+
+
+def _inflacion_y_uva(copia, ahora, hoy, avisos_ad):
+    """Inflación mensual, interanual y UVA (ArgentinaDatos, una copia local por serie, una consulta cada 3 horas)."""
+    series = [
+        ("inflacion", URL_INFLACION, "Inflación mensual", _texto_inflacion_mensual),
+        ("inflacion_interanual", URL_INFLACION_INTERANUAL, "Inflación interanual", _texto_inflacion_interanual),
+        ("uva", URL_UVA, "UVA", utilidades.monto),
+    ]
+    items = []
+    for clave, url, nombre, formatear in series:
+        respuesta = _respuesta(copia, clave, url, ahora, True, "ArgentinaDatos", avisos_ad)
+        valor, fecha = _ultima_de_lista(respuesta, hoy)
+        texto = formatear(valor) if valor is not None else None
+        items.append(_indicador(clave, "inflacion", nombre, FUENTE_ARGENTINADATOS, texto, fecha, hoy,
+                                mensual=clave in CLAVES_MENSUALES))
+    return items
+
+
+def _serie_bcra(copia, ahora, hoy, avisos_bcra, serie, grupo, nombre, formatear, clave=None):
+    """Consulta una serie del BCRA (por su id de config.BCRA_IDS) y arma el indicador."""
+    url = URL_BCRA_VARIABLE.format(id=BCRA_IDS[serie])
+    respuesta = _respuesta(copia, f"bcra_{serie}", url, ahora, False, "BCRA", avisos_bcra)
+    valor, fecha = _ultimo_de_serie(respuesta, hoy)
+    texto = formatear(valor) if valor is not None else None
+    return _indicador(clave or serie, grupo, nombre, FUENTE_BCRA, texto, fecha, hoy)
+
+
+def _indicador(clave, grupo, nombre, fuente, texto, momento, hoy, mensual=False):
+    """Arma un indicador. Sin texto o sin fecha, es "sin dato".
+
+    Un indicador `mensual` muestra su fecha como mes ("octubre 2026") y está desactualizado
+    si su mes quedó 2 meses o más atrás del de hoy (spec 48).
+    """
     if texto is None or momento is None:
         return {
             "clave": clave, "grupo": grupo, "nombre": nombre,
             "valor": None, "fecha": None, "fuente": fuente, "desactualizado": False,
+        }
+    if mensual:
+        return {
+            "clave": clave, "grupo": grupo, "nombre": nombre,
+            "valor": texto,
+            "fecha": utilidades.mostrar_mes(momento),
+            "fuente": fuente,
+            "desactualizado": utilidades.meses_entre(utilidades.dia_de(momento), hoy) >= 2,
         }
     return {
         "clave": clave, "grupo": grupo, "nombre": nombre,
@@ -165,12 +251,33 @@ def _cotizaciones(respuesta):
     return salida
 
 
-def _reservas_ultimo(respuesta):
-    """Devuelve (valor, fecha) del dato más reciente de la serie del BCRA.
+def _ultima_de_lista(respuesta, hoy):
+    """Devuelve (valor, fecha) de la fila con la fecha más reciente de una serie de ArgentinaDatos.
 
-    El endpoint /monetarias/1 trae `results[0].detalle` con las filas más
-    recientes primero. La fecha y el valor de esa fila coinciden con
-    `ultFechaInformada` y `ultValorInformado` del catálogo del BCRA.
+    La respuesta es una lista de filas `fecha` y `valor`. No se confía en el orden: se ignoran las
+    filas con fecha o valor inválido y las de fecha futura (la UVA, por ejemplo, trae días por adelantado).
+    """
+    if not isinstance(respuesta, list):
+        return None, None
+    filas = []
+    for fila in respuesta:
+        if not isinstance(fila, dict):
+            continue
+        fecha = utilidades.dia(fila.get("fecha"))
+        valor = utilidades.numero(fila.get("valor"))
+        if fecha is not None and valor is not None and fecha <= hoy:
+            filas.append((fecha, valor))
+    if not filas:
+        return None, None
+    fecha, valor = max(filas)
+    return valor, fecha
+
+
+def _ultimo_de_serie(respuesta, hoy):
+    """Devuelve (valor, fecha) de la fila con la fecha más reciente de una serie del BCRA v4.0.
+
+    La respuesta trae `results[0].detalle` con filas `fecha` y `valor`. No se confía en el orden:
+    se ignoran las filas con fecha o valor inválido y las de fecha futura (respecto de `hoy`).
     """
     try:
         detalle = respuesta["results"][0]["detalle"]
@@ -185,7 +292,7 @@ def _reservas_ultimo(respuesta):
             continue
         fecha = utilidades.dia(fila.get("fecha"))
         valor = utilidades.numero(fila.get("valor"))
-        if fecha is not None and valor is not None:
+        if fecha is not None and valor is not None and fecha <= hoy:
             filas.append((fecha, valor))
     if not filas:
         return None, None

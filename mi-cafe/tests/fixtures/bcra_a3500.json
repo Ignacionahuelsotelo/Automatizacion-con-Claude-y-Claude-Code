@@ -1,0 +1,4 @@
+{"status": 200, "metadata": {"resultset": {"count": 6058, "offset": 0, "limit": 3}}, "results": [{"idVariable": 5, "detalle": [
+  {"fecha": "2026-11-17", "valor": 1234.5},
+  {"fecha": "2026-11-16", "valor": 1230.0}
+]}]}

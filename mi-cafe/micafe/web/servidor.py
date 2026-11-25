@@ -9,6 +9,7 @@ hay uno en curso); el avance y el resultado se consultan en /api/resumen/estado 
 y el resumen se guarda en datos/resumenes/ (spec 30). Los 👍/👎 se leen
 en /api/gustos (GET) y se guardan en /api/gustos (POST). La pregunta sobre una nota
 va a /api/preguntas (POST), que responde solo con lo que dice esa nota (spec 10).
+Lo aprendido de los votos se lee en /api/perfil (GET) y se ignora con /api/perfil/reiniciar (POST, spec 41).
 El resto de las rutas responde 404.
 Atiende cada pedido en su propio hilo: mientras Claude redacta el resumen, la
 página sigue pidiendo lo demás. Si un pedido falla de forma no prevista, el
@@ -101,6 +102,15 @@ def _ruta_gustos_post(peticion: Manejador) -> RespuestaRuta:
     return (400, {"ok": False, "errores": errores}) if errores else (200, {"ok": True, "votos": votos})
 
 
+def _ruta_perfil_get(peticion: Manejador) -> RespuestaRuta:
+    return 200, {"ok": True, **servicio.obtener_perfil()}
+
+
+def _ruta_perfil_reiniciar(peticion: Manejador) -> RespuestaRuta:
+    perfil, errores = servicio.reiniciar_perfil(peticion.cuerpo_json_opcional())
+    return (400, {"ok": False, "errores": errores}) if errores else (200, {"ok": True, **perfil})
+
+
 def _ruta_preguntas(peticion: Manejador) -> RespuestaRuta:
     return 200, {"ok": True, **servicio.responder_pregunta(peticion.cuerpo_json())}
 
@@ -116,6 +126,8 @@ RUTAS_JSON: dict[tuple[str, str], Callable[[Manejador], RespuestaRuta]] = {
     ("GET", "/api/resumen/estado"): _ruta_resumen_estado,
     ("GET", "/api/gustos"): _ruta_gustos_get,
     ("POST", "/api/gustos"): _ruta_gustos_post,
+    ("GET", "/api/perfil"): _ruta_perfil_get,
+    ("POST", "/api/perfil/reiniciar"): _ruta_perfil_reiniciar,
     ("POST", "/api/preguntas"): _ruta_preguntas,
 }
 

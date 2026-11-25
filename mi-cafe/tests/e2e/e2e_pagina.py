@@ -125,9 +125,298 @@ def caso_pedido_en_cabecera_escapado(page):
     expect(page.locator("#cabecera-resumen b")).to_have_count(0)
 
 
+RESUMEN_CON_PLAN = {
+    "fecha": "2026-11-18", "generado_en": "18/11/2026 08:00", "texto": "Política\n", "indicadores": [],
+    "chequeo": {"aprobado": True, "no_cumple": []}, "notas": [], "pedido": "<b>fútbol</b>",
+    "pedido_sin_notas": True, "temas_destildados_pedido": ["Deportes"],
+    "plan": {"secciones": [{"seccion": "Política", "cupo": 4, "pedidas": 0, "motivos": []},
+                           {"seccion": "Economía", "cupo": 1, "pedidas": 0, "motivos": []}], "completo": False},
+}
+
+
+def _recargar_con_resumen(page, resumen):
+    page.route("**/api/resumen", lambda ruta: ruta.fulfill(
+        json={"resumen": resumen}) if ruta.request.method == "GET" else ruta.continue_())
+    page.reload()
+    page.wait_for_load_state("networkidle")
+
+
+def caso_aviso_de_pedido_sin_notas_y_tema_destildado(page):
+    _recargar_con_resumen(page, RESUMEN_CON_PLAN)
+    aviso = page.locator("#aviso-pedido")
+    expect(aviso).to_contain_text("Tu pedido no encontró notas de ayer.")
+    expect(aviso).to_contain_text("Ese tema está destildado en tus preferencias.")
+    assert aviso.get_attribute("role") == "status"
+    aviso.get_by_role("button", name="Ir a preferencias").click()
+    expect(page.locator("#preferencias")).to_be_visible()
+    assert page.url.endswith("#preferencias")
+    expect(page.locator("#pref-temas .fila-tema", has_text="Deportes").locator("input[type=checkbox]")).to_be_focused()
+    expect(page.locator("#cabecera-resumen b")).to_have_count(0)
+
+
+def caso_como_se_armo_con_teclado(page):
+    _recargar_con_resumen(page, RESUMEN_CON_PLAN)
+    resumen = page.locator("#como-se-armo summary")
+    expect(resumen).to_have_text("Cómo se armó hoy")
+    resumen.focus()
+    page.keyboard.press("Enter")
+    expect(page.locator("#como-se-armo")).to_have_attribute("open", "")
+    expect(page.locator("#como-se-armo-contenido")).to_contain_text("Política: 4 notas")
+    expect(page.locator("#como-se-armo-contenido")).to_contain_text("Economía: 1 nota")
+    expect(page.locator("#como-se-armo-contenido")).to_contain_text("El plan quedó incompleto")
+    page.keyboard.press("Space")
+    expect(page.locator("#como-se-armo")).not_to_have_attribute("open", "")
+
+
+def caso_resumen_viejo_sin_plan_no_muestra_el_bloque(page):
+    viejo = {k: v for k, v in RESUMEN_CON_PLAN.items() if k not in ("plan", "pedido_sin_notas", "temas_destildados_pedido")}
+    _recargar_con_resumen(page, viejo)
+    expect(page.locator("#como-se-armo")).to_be_hidden()
+    expect(page.locator("#aviso-pedido")).to_be_hidden()
+
+
+def caso_etiquetas_y_secciones_del_servidor(page):
+    nota = {"titulo": "<i>River</i> gana", "medio": "<b>Medio</b>", "seccion": "Deportes",
+            "fecha": "17/11/2026 10:00", "link": LINK_1, "motivos": ["pedido: river (titulo)", "medio que te gusta", "palabra a evitar", "subtema no elegido"]}
+    page.route("**/api/noticias", lambda ruta: ruta.fulfill(json={"notas": [nota], "fallas": []}))
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    etiquetas = page.locator("#lista-noticias .etiqueta")
+    expect(etiquetas).to_have_text(
+        ["Por tu pedido", "Medio que te gusta", "Palabra que evitás", "Subtema que no elegiste"])
+    expect(page.locator("#lista-noticias i, #lista-noticias b")).to_have_count(0)
+    secciones = page.request.get(URL + "/api/preferencias").json()["opciones"]["secciones"]
+    expect(page.locator("#pref-temas .fila-tema")).to_have_count(len(secciones))
+    expect(page.locator("#pref-temas .fila-tema", has_text="Internacional")).to_have_count(1)
+
+
+# --- Spec 50: pantalla de Preferencias ---------------------------------------------
+
+def _abrir_preferencias(page):
+    page.get_by_role("link", name="Preferencias").click()
+    expect(page.locator("#preferencias")).to_be_visible()
+    expect(page.locator("#pref-temas .fila-tema").first).to_be_visible()
+
+
+def _fila(page, tema):
+    return page.locator("#pref-temas .fila-tema", has_text=tema)
+
+
+def caso_prefs_abre_con_boton_vuelve_y_atras(page):
+    expect(page.locator("#preferencias")).to_be_hidden()
+    expect(page.locator("#resumen-prefs")).to_contain_text("Temas: Política")
+    boton = page.get_by_role("link", name="Preferencias")
+    boton.focus()
+    page.keyboard.press("Enter")
+    expect(page.locator("#preferencias")).to_be_visible()
+    expect(page.locator("#vista-resumen")).to_be_hidden()
+    assert page.url.endswith("#preferencias")
+    expect(page.locator("#titulo-preferencias")).to_be_focused()
+    page.get_by_role("button", name="Volver al resumen").click()
+    expect(page.locator("#vista-resumen")).to_be_visible()
+    expect(page.locator("#resumen h3").first).to_have_text("Política")
+    expect(boton).to_be_focused()
+    page.go_back()
+    expect(page.locator("#preferencias")).to_be_visible()
+    page.go_forward()
+    expect(page.locator("#preferencias")).to_be_hidden()
+    page.get_by_role("link", name="Cambiar").click()
+    expect(page.locator("#preferencias")).to_be_visible()
+
+
+def caso_prefs_abre_directo_con_hash(page):
+    page.goto(URL + "/#preferencias")
+    page.wait_for_load_state("networkidle")
+    expect(page.locator("#preferencias")).to_be_visible()
+    expect(page.locator("#vista-resumen")).to_be_hidden()
+    opciones = page.request.get(URL + "/api/preferencias").json()["opciones"]
+    expect(page.locator("#pref-temas .fila-tema")).to_have_count(len(opciones["secciones"]))
+    expect(page.locator("#pref-subtemas input")).to_have_count(len(opciones["subtemas"]))
+    expect(page.locator("#pref-medios-preferidos input")).to_have_count(len(opciones["medios"]))
+    expect(page.locator("#pref-medios-excluidos input")).to_have_count(len(opciones["medios"]))
+    expect(page.locator("#pref-indicadores input")).to_have_count(len(opciones["indicadores"]))
+    expect(page.locator("#pref-palabras legend")).to_have_text(["Palabras que quiero seguir", "Palabras que quiero evitar"])
+    expect(page.locator("#titulo-perfil")).to_be_visible()
+    expect(page.locator("#perfil-contenido")).to_contain_text("Todavía no aprendí nada de tus 👍/👎.")
+    expect(page.locator("#pref-temas .fila-tema input[type=checkbox]").first).to_have_attribute("role", "switch")
+
+
+def caso_prefs_apagar_tema_prioridad_y_subtemas(page):
+    _abrir_preferencias(page)
+    deportes = _fila(page, "Deportes")
+    selector = deportes.locator("select")
+    expect(selector).to_be_enabled()
+    expect(page.locator("#pref-subtemas-bloque")).to_be_visible()
+    deportes.locator("input[type=checkbox]").uncheck()
+    expect(selector).to_be_disabled()
+    expect(deportes.locator(".estado-tema")).to_have_text("Apagado")
+    expect(page.locator("#pref-subtemas-bloque")).to_be_hidden()
+    deportes.locator("input[type=checkbox]").check()
+    expect(page.locator("#pref-subtemas-bloque")).to_be_visible()
+    selector.select_option("alta")
+    expect(selector).to_have_value("alta")
+
+
+def caso_prefs_medio_no_queda_en_las_dos_listas(page):
+    _abrir_preferencias(page)
+    preferido = page.locator("#pref-medios-preferidos label", has_text="Perfil").locator("input")
+    excluido = page.locator("#pref-medios-excluidos label", has_text="Perfil").locator("input")
+    preferido.check()
+    excluido.check()
+    expect(preferido).not_to_be_checked()
+    expect(page.locator("#estado-medios")).to_contain_text("Perfil ya no está en los medios que preferís.")
+    preferido.check()
+    expect(excluido).not_to_be_checked()
+    expect(page.locator("#estado-medios")).to_contain_text("ya no está en los medios que no querés ver")
+
+
+def caso_prefs_palabras_agregar_quitar_topes_y_html(page):
+    _abrir_preferencias(page)
+    opciones = page.request.get(URL + "/api/preferencias").json()["opciones"]
+    campo = page.locator("#pref-palabras fieldset").first
+    entrada = campo.locator("input[type=text]")
+    entrada.fill("<b>x</b>")
+    entrada.press("Enter")
+    expect(campo.locator(".lista-palabras li")).to_have_text(["<b>x</b>Quitar"])
+    expect(campo.locator("b")).to_have_count(0)
+    expect(entrada).to_be_focused()
+    entrada.fill("Boca")
+    campo.get_by_role("button", name="Agregar").click()
+    expect(campo.locator(".lista-palabras li")).to_have_count(2)
+    entrada.fill("a" * (opciones["maximo_caracteres"] + 1))
+    entrada.press("Enter")
+    expect(campo.get_by_role("status")).to_have_text(
+        f"Cada palabra puede tener hasta {opciones['maximo_caracteres']} caracteres.")
+    expect(campo.locator(".lista-palabras li")).to_have_count(2)
+    for i in range(opciones["maximo_palabras"]):
+        entrada.fill(f"palabra{i}")
+        entrada.press("Enter")
+    expect(campo.locator(".lista-palabras li")).to_have_count(opciones["maximo_palabras"])
+    expect(campo.get_by_role("status")).to_contain_text(f"hasta {opciones['maximo_palabras']} palabras")
+    campo.get_by_role("button", name="Quitar <b>x</b>").click()
+    expect(campo.locator(".lista-palabras li")).to_have_count(opciones["maximo_palabras"] - 1)
+    expect(entrada).to_be_focused()
+
+
+def caso_prefs_guardar_recargar_y_restaurar(page):
+    _abrir_preferencias(page)
+    _fila(page, "Deportes").locator("select").select_option("alta")
+    page.locator("#pref-medios-excluidos label", has_text="Perfil").locator("input").check()
+    campo = page.locator("#pref-palabras fieldset").first
+    campo.locator("input[type=text]").fill("Boca")
+    campo.get_by_role("button", name="Agregar").click()
+    page.get_by_role("button", name="Guardar", exact=True).click()
+    expect(page.locator("#estado-guardado")).to_have_text("Guardado.")
+    page.reload()
+    page.wait_for_load_state("networkidle")
+    expect(page.locator("#preferencias")).to_be_visible()
+    expect(_fila(page, "Deportes").locator("select")).to_have_value("alta")
+    expect(page.locator("#pref-medios-excluidos label", has_text="Perfil").locator("input")).to_be_checked()
+    expect(page.locator("#pref-palabras fieldset").first.locator(".lista-palabras li")).to_have_text(["BocaQuitar"])
+    # Deja los datos temporales como estaban.
+    _fila(page, "Deportes").locator("select").select_option("normal")
+    page.locator("#pref-medios-excluidos label", has_text="Perfil").locator("input").uncheck()
+    page.locator("#pref-palabras fieldset").first.get_by_role("button", name="Quitar Boca").click()
+    page.get_by_role("button", name="Guardar", exact=True).click()
+    expect(page.locator("#estado-guardado")).to_have_text("Guardado.")
+    # Un cambio posterior borra el "Guardado.".
+    _fila(page, "Deportes").locator("select").select_option("baja")
+    expect(page.locator("#estado-guardado")).to_have_text("")
+    _fila(page, "Deportes").locator("select").select_option("normal")
+
+
+def caso_prefs_error_400_en_espanol_y_conserva_lo_escrito(page):
+    _abrir_preferencias(page)
+    for fila in page.locator("#pref-temas .fila-tema").all():
+        fila.locator("input[type=checkbox]").uncheck()
+    expect(page.locator("#aviso-temas")).to_have_text("Elegí al menos un tema.")
+    page.get_by_role("button", name="Guardar", exact=True).click()
+    expect(page.locator("#errores-prefs")).to_contain_text("Elegí al menos un tema.")
+    assert page.locator("#errores-prefs").get_attribute("role") == "alert"
+    expect(page.locator("#estado-guardado")).to_have_text("")
+    expect(page.locator("#pref-temas .fila-tema input[type=checkbox]").first).not_to_be_checked()
+    # Un 400 con otros errores también se ve, uno por línea.
+    page.route("**/api/preferencias", lambda ruta: ruta.fulfill(status=400, json={
+        "ok": False, "errores": ["Primer error.", "Segundo error."]}) if ruta.request.method == "POST" else ruta.continue_())
+    page.get_by_role("button", name="Guardar", exact=True).click()
+    expect(page.locator("#errores-prefs p")).to_have_text(["No se guardó:", "Primer error.", "Segundo error."])
+
+
+def caso_prefs_aviso_de_cambios_sin_guardar(page):
+    _abrir_preferencias(page)
+    _fila(page, "Deportes").locator("select").select_option("alta")
+    page.get_by_role("button", name="Volver al resumen").click()
+    expect(page.locator("#aviso-cambios")).to_be_visible()
+    expect(page.locator("#aviso-cambios")).to_contain_text("Tenés cambios sin guardar.")
+    expect(page.locator("#preferencias")).to_be_visible()
+    page.get_by_role("button", name="Seguir editando").click()
+    expect(page.locator("#aviso-cambios")).to_be_hidden()
+    page.get_by_role("button", name="Volver al resumen").click()
+    page.get_by_role("button", name="Descartar y salir").click()
+    expect(page.locator("#vista-resumen")).to_be_visible()
+    _abrir_preferencias(page)
+    expect(_fila(page, "Deportes").locator("select")).to_have_value("normal")
+    page.go_back()  # sin cambios: sale sin avisos
+    expect(page.locator("#vista-resumen")).to_be_visible()
+
+
+def caso_prefs_reiniciar_lo_aprendido(page):
+    for i in range(3):  # votos de tema con hora distinta del reinicio
+        page.request.post(URL + "/api/gustos", data={"tipo": "tema", "clave": "Deportes", "voto": "me_gusta"})
+    _abrir_preferencias(page)
+    expect(page.locator("#perfil-contenido li").first).to_contain_text("Deportes")
+    expect(page.locator("#perfil-contenido")).to_contain_text("Votos que cuentan: 1.")
+    page.once("dialog", lambda d: d.dismiss())
+    page.get_by_role("button", name="Reiniciar lo aprendido").click()
+    expect(page.locator("#perfil-contenido li").first).to_contain_text("Deportes")
+    page.wait_for_timeout(1100)
+    page.once("dialog", lambda d: d.accept())
+    page.get_by_role("button", name="Reiniciar lo aprendido").click()
+    expect(page.locator("#estado-reinicio-vista")).to_contain_text("Listo")
+    expect(page.locator("#perfil-contenido")).to_contain_text("Todavía no aprendí nada de tus 👍/👎.")
+    expect(page.locator("#perfil-contenido")).to_contain_text("Último reinicio:")
+    page.request.post(URL + "/api/gustos", data={"tipo": "tema", "clave": "Deportes", "voto": None})
+
+
+def caso_prefs_teclado_recorre_todo_y_guarda(page):
+    _abrir_preferencias(page)
+    page.locator("#titulo-preferencias").focus()
+    page.keyboard.press("Tab")
+    # Primer control de la vista tras el título: el interruptor del primer tema.
+    primero = page.locator("#pref-temas input[type=checkbox]").first
+    expect(primero).to_be_focused()
+    page.keyboard.press("Space")
+    expect(primero).not_to_be_checked()
+    page.keyboard.press("Space")
+    expect(primero).to_be_checked()
+    esperados = page.evaluate("""() => Array.from(document.querySelectorAll(
+        '#preferencias button, #preferencias input, #preferencias select'))
+        .filter((e) => e.offsetParent !== null && !e.disabled && e.id !== 'cambios-guardar'
+          && !e.closest('#aviso-cambios')).length""")
+    recorridos = set()
+    for _ in range(esperados + 5):
+        recorridos.add(page.evaluate("document.activeElement.id || document.activeElement.textContent"))
+        if page.evaluate("document.activeElement.id") == "guardar-prefs":
+            break
+        page.keyboard.press("Tab")
+    assert page.evaluate("document.activeElement.id") == "guardar-prefs", recorridos
+    page.keyboard.press("Enter")
+    expect(page.locator("#estado-guardado")).to_have_text("Guardado.")
+    for etiqueta in page.locator("#preferencias label").all():
+        assert etiqueta.inner_text().strip() or etiqueta.get_attribute("for") or etiqueta.locator("input").count()
+    assert page.locator("#preferencias fieldset legend").count() >= 6
+
+
 CASOS = [caso_carga, caso_indicadores_con_fecha_y_fuente, caso_sin_dato_visible, caso_nota_con_enlace,
          caso_voto, caso_caja_de_preguntas, caso_aviso_de_fuente_caida, caso_aviso_del_corrector,
          caso_pedido_contador_y_error_del_servidor, caso_pedido_en_cabecera_escapado,
+         caso_aviso_de_pedido_sin_notas_y_tema_destildado, caso_como_se_armo_con_teclado,
+         caso_resumen_viejo_sin_plan_no_muestra_el_bloque, caso_etiquetas_y_secciones_del_servidor,
+         caso_prefs_abre_con_boton_vuelve_y_atras, caso_prefs_abre_directo_con_hash,
+         caso_prefs_apagar_tema_prioridad_y_subtemas, caso_prefs_medio_no_queda_en_las_dos_listas,
+         caso_prefs_palabras_agregar_quitar_topes_y_html, caso_prefs_guardar_recargar_y_restaurar,
+         caso_prefs_error_400_en_espanol_y_conserva_lo_escrito, caso_prefs_aviso_de_cambios_sin_guardar,
+         caso_prefs_reiniciar_lo_aprendido, caso_prefs_teclado_recorre_todo_y_guarda,
          # Los dos últimos reemplazan el resumen guardado (el armado simulado): van al final.
          caso_pedido_sin_texto_no_manda_el_campo, caso_pedido_se_manda_se_guarda_y_se_vacia]
 
@@ -138,7 +427,8 @@ def correr(navegador, caso):
     page.set_default_timeout(5000)
     problemas = []
     # El 400 del pedido demasiado largo es esperado: el navegador lo registra como error de recurso.
-    esperado = "status of 400" if caso is caso_pedido_contador_y_error_del_servidor else None
+    esperado = "status of 400" if caso in (caso_pedido_contador_y_error_del_servidor,
+                                           caso_prefs_error_400_en_espanol_y_conserva_lo_escrito) else None
     page.on("console", lambda m: problemas.append(f"consola ({m.type}): {m.text}")
             if m.type == "error" and not (esperado and esperado in m.text) else None)
     page.on("pageerror", lambda e: problemas.append(f"error de la página: {e}"))

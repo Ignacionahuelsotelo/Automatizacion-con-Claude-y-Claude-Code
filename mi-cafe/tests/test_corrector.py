@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from micafe.dominio import corrector
 from micafe.dominio import resumen
@@ -36,8 +37,8 @@ def _texto(notas=NOTAS[:3], palabras=600, extra=""):
     return armar(max(palabras - len(texto.split()), 0))
 
 
-def _revisar(texto, notas=NOTAS, tope=3, palabras_indicadores=0, previos=None, **kwargs):
-    return corrector.revisar(lambda c, b: texto, notas, tope, palabras_indicadores, previos=previos, **kwargs)
+def _revisar(texto, notas=NOTAS, tope=3, previos=None, **kwargs):
+    return corrector.revisar(lambda c, b: texto, notas, tope, previos=previos, **kwargs)
 
 
 def _errores(resultado):
@@ -69,13 +70,18 @@ class Largo(unittest.TestCase):
                 self.assertFalse(resultado["chequeo"]["aprobado"])
                 self.assertTrue(any(e.startswith("Largo:") for e in _errores(resultado)))
 
-    def test_las_palabras_de_los_indicadores_cuentan_para_el_largo(self):
-        self.assertFalse(_revisar(_texto(palabras=600), palabras_indicadores=100, reintentos=0)["chequeo"]["aprobado"])
-        self.assertTrue(_revisar(_texto(palabras=500), palabras_indicadores=100)["chequeo"]["aprobado"])
+    def test_el_largo_cuenta_solo_el_texto_y_el_mensaje_no_menciona_indicadores(self):
+        self.assertTrue(_revisar(_texto(palabras=560))["chequeo"]["aprobado"])
+        resultado = _revisar(_texto(palabras=660), reintentos=0)
+        self.assertFalse(resultado["chequeo"]["aprobado"])
+        error = [e for e in _errores(resultado) if e.startswith("Largo:")][0]
+        self.assertNotIn("indicadores con", error)
+        self.assertNotIn("sin indicadores", error)
+        self.assertIn("660 palabras", error)
 
-    def test_si_se_pasa_sugiere_recortar_desde_deportes_y_tecnologia(self):
+    def test_si_se_pasa_sugiere_recortar_desde_las_secciones_de_menor_prioridad(self):
         resultado = _revisar(_texto(palabras=700), reintentos=0)
-        self.assertTrue(any("Deportes y Tecnología" in e for e in _errores(resultado)))
+        self.assertTrue(any("menor prioridad" in e for e in _errores(resultado)))
 
 
 class Enlaces(unittest.TestCase):
@@ -205,6 +211,21 @@ class ChequeoConModelo(unittest.TestCase):
         self.assertEqual(resultado["chequeo"]["intentos"], 1)
         self.assertTrue(any("No se pudo revisar el contenido" in e for e in _errores(resultado)))
 
+    def test_el_prompt_del_corrector_incluye_la_bajada(self):
+        notas = [{"titulo": "Con bajada", "medio": "Infobae", "seccion": "Política", "fecha": "17/11/2026 09:00",
+                  "link": "https://a.test/1", "bajada": "Esta es la bajada."},
+                 {"titulo": "Sin bajada", "medio": "Ámbito", "seccion": "Economía", "fecha": "17/11/2026 09:00",
+                  "link": "https://a.test/2"}]
+        with mock.patch("micafe.dominio.corrector.resumen.ejecutar_claude", return_value="OK") as claude:
+            self.assertEqual(corrector.verificar_con_modelo("Texto", notas), [])
+        pedido = claude.call_args.args[0]
+        self.assertIn("Con bajada (Infobae). Link: https://a.test/1\n  Bajada: Esta es la bajada.", pedido)
+        self.assertEqual(pedido.count("Bajada:"), 1)
+
+    def test_la_skill_del_corrector_habla_de_titulo_y_bajada(self):
+        with open(corrector.ARCHIVO_SKILL, encoding="utf-8") as archivo:
+            self.assertIn("título y bajada", archivo.read())
+
     def test_interpretar_veredicto(self):
         self.assertEqual(corrector.interpretar_veredicto("OK"), [])
         self.assertEqual(corrector.interpretar_veredicto("ok."), [])
@@ -248,5 +269,90 @@ class NotasVotables(unittest.TestCase):
         self.assertEqual(corrector.notas_votables(None), [])
 
 
+class EncabezadosDeVariasPalabras(unittest.TestCase):
+    def test_salud_y_ciencia_y_espectaculos_y_cultura_son_secciones(self):
+        texto = _texto_en_secciones([("Salud y Ciencia", NOTAS[:1]), ("Espectáculos y Cultura", NOTAS[1:2])])
+        votables = corrector.notas_votables(texto)
+        self.assertEqual([(n["seccion"], n["link"]) for n in votables],
+                         [("Salud y Ciencia", "https://infobae.test/1"),
+                          ("Espectáculos y Cultura", "https://ambito.test/2")])
+        resultado = _revisar(texto, plan=_plan(**{"Salud y Ciencia": 1, "Espectáculos y Cultura": 1}), reintentos=0)
+        self.assertFalse(any("no está en el plan" in e for e in _errores(resultado)))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def _plan(**cupos):
+    return [{"seccion": s, "cupo": c, "pedidas": 0, "motivos": []} for s, c in cupos.items()]
+
+
+def _texto_en_secciones(notas_por_seccion, palabras=600):
+    """Resumen con encabezados de sección propios (una línea sola) y una nota por bloque."""
+    bloques = ["Lo más importante de hoy: " + "palabra " * max(palabras - 60, 0)]
+    for seccion, notas in notas_por_seccion:
+        bloques.append(seccion)
+        bloques += [f"{n['titulo']}\nUn párrafo que cuenta de qué trata la nota.\n{n['link']}" for n in notas]
+    return "\n\n".join(bloques)
+
+
+class SeccionesDelPlan(unittest.TestCase):
+    def test_cumple_el_plan_pasa(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:2]), ("Deportes", NOTAS[2:3])])
+        resultado = _revisar(texto, plan=_plan(Política=2, Deportes=1), reintentos=0)
+        self.assertTrue(resultado["chequeo"]["aprobado"], _errores(resultado))
+
+    def test_seccion_fuera_del_plan_no_pasa(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:2]), ("Deportes", NOTAS[2:3])])
+        resultado = _revisar(texto, plan=_plan(Política=2), reintentos=0)
+        self.assertFalse(resultado["chequeo"]["aprobado"])
+        self.assertTrue(any("Deportes no está en el plan" in e for e in _errores(resultado)))
+
+    def test_mas_notas_que_la_cuota_no_pasa(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:3])])
+        resultado = _revisar(texto, plan=_plan(Política=2), reintentos=0)
+        self.assertTrue(any("tiene 3 notas y su cuota de hoy es 2" in e for e in _errores(resultado)))
+
+    def test_sin_plan_no_se_chequea(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:3])])
+        self.assertTrue(_revisar(texto, reintentos=0)["chequeo"]["aprobado"])
+
+
+class PedidoDelPlan(unittest.TestCase):
+    def test_con_dos_pedidas_y_ninguna_en_el_resumen_no_pasa(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:2])])
+        pedidas = [NOTAS[4]["link"], NOTAS[5]["link"]]
+        resultado = _revisar(texto, pedidas=pedidas, reintentos=0)
+        self.assertTrue(any(e.startswith("Pedido:") for e in _errores(resultado)))
+
+    def test_con_dos_pedidas_hacen_falta_dos(self):
+        pedidas = [NOTAS[0]["link"], NOTAS[5]["link"]]
+        una = _texto_en_secciones([("Política", NOTAS[:2])])
+        dos = _texto_en_secciones([("Política", [NOTAS[0], NOTAS[5]])])
+        self.assertFalse(_revisar(una, pedidas=pedidas, reintentos=0)["chequeo"]["aprobado"])
+        self.assertTrue(_revisar(dos, pedidas=pedidas, reintentos=0)["chequeo"]["aprobado"])
+
+    def test_con_una_sola_pedida_alcanza_con_una(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:2])])
+        self.assertTrue(_revisar(texto, pedidas=[NOTAS[1]["link"]], reintentos=0)["chequeo"]["aprobado"])
+        self.assertFalse(_revisar(texto, pedidas=[NOTAS[5]["link"]], reintentos=0)["chequeo"]["aprobado"])
+
+
+class LargoSegunElPlan(unittest.TestCase):
+    def test_plan_incompleto_acepta_menos_de_550_y_lo_deja_registrado(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:2])], palabras=300)
+        resultado = _revisar(texto, plan=_plan(Política=2), plan_completo=False, reintentos=0)
+        self.assertTrue(resultado["chequeo"]["aprobado"], _errores(resultado))
+        self.assertTrue(any("Largo mínimo no exigido" in o for o in resultado["chequeo"]["omitido"]))
+
+    def test_plan_completo_exige_550(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:2])], palabras=300)
+        resultado = _revisar(texto, plan=_plan(Política=2), plan_completo=True, reintentos=0)
+        self.assertFalse(resultado["chequeo"]["aprobado"])
+
+    def test_el_maximo_vale_aunque_el_plan_sea_incompleto_y_nombra_el_orden_de_recorte(self):
+        texto = _texto_en_secciones([("Política", NOTAS[:2])], palabras=700)
+        plan = _plan(Política=2, Deportes=1)
+        resultado = _revisar(texto, plan=plan, plan_completo=False, reintentos=0)
+        self.assertTrue(any("menor prioridad" in e and "Orden para recortar" in e for e in _errores(resultado)))

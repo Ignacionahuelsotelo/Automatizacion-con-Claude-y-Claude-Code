@@ -1,6 +1,6 @@
 # Mi Café
 
-Resumen diario de noticias argentinas que se lee en unos 3 minutos: indicadores (dólar, riesgo país, reservas, acciones) más las notas de ayer, cada una con su link. Los números salen de APIs con fecha y fuente (nunca los escribe la IA); si falta un dato, dice "sin dato". La redacción la hace Claude con `claude -p`.
+Resumen diario de noticias argentinas que se lee en unos 3 minutos: indicadores (dólar y otros dólares, riesgo país, reservas, tasas, inflación, UVA, acciones) más las notas de ayer, cada una con su link. Elegís qué temas, medios, palabras e indicadores querés en la pantalla de Preferencias. Los números salen de APIs con fecha y fuente (nunca los escribe la IA); si falta un dato, dice "sin dato". La redacción la hace Claude con `claude -p`.
 
 ## Requisitos
 
@@ -13,7 +13,7 @@ Resumen diario de noticias argentinas que se lee en unos 3 minutos: indicadores 
 python3 servidor.py
 ```
 
-Después abrí http://localhost:8000 (puerto fijo 8000, solo en 127.0.0.1) y tocá "Preparar el de hoy".
+Después abrí http://localhost:8000 (puerto fijo 8000, solo en 127.0.0.1), ajustá lo que quieras en Preferencias (`#preferencias`, dentro de la misma página) y tocá "Preparar el de hoy".
 
 Si una fuente falla (API, RSS o `claude`), la página lo avisa en español y sigue andando. Los errores técnicos van a la consola del servidor.
 
@@ -50,12 +50,19 @@ El puerto y el host no se cambian.
 ```
 Pedido opcional de noticias (texto) + botón "Preparar el de hoy"
   -> servidor (micafe/web)
-     -> fuentes: indicadores y acciones (APIs) + noticias de ayer (RSS)
-     -> claude -p redacta, siguiendo las skills y tus gustos
+     -> fuentes: indicadores y acciones (APIs) + noticias de ayer (RSS, leídos en paralelo)
+     -> selección por puntaje (pedido, frescura, tus preferencias y tus gustos) y plan de secciones
+     -> claude -p redacta, siguiendo las skills
      -> corrector (enlaces, repetidas, largo)
      -> se guarda en datos/resumenes/
   -> la página lo muestra
 ```
+
+La página muestra cómo se adaptó el resumen: "Noticias de ayer" va ordenada por puntaje con etiquetas ("Por tu pedido", "Medio que te gusta", "Tema que te gusta"), el bloque plegable "Cómo se armó hoy" (notas por sección y ajustes por tus votos, con "Reiniciar lo aprendido") y un aviso si tu pedido no encontró notas de ayer.
+
+Temas elegibles (8): Política, Economía, Internacional, Sociedad, Deportes, Salud y Ciencia, Espectáculos y Cultura y Tecnología; Deportes tiene subtemas (fútbol argentino, fútbol internacional, tenis, básquet, automovilismo y otros). En Preferencias también podés marcar prioridad por tema, medios preferidos o excluidos, y palabras a seguir o evitar.
+
+El largo objetivo (550 a 650 palabras) cuenta solo las notas; los indicadores se muestran aparte.
 
 Más detalle en [docs/plan.md](docs/plan.md).
 
@@ -63,12 +70,12 @@ Más detalle en [docs/plan.md](docs/plan.md).
 
 - `servidor.py`: lanzador (llama a `micafe.web.servidor.main`).
 - `micafe/`: el paquete (ver [micafe/README.md](micafe/README.md)).
-  - `config.py`, `errores.py`, `logs.py`, `modelos.py`: configuración central, errores, logging y tipos compartidos.
+  - `config.py`, `errores.py`, `logs.py`, `modelos.py`, `textos.py`: configuración central, errores, logging, tipos compartidos y normalización de texto.
   - `web/`: servidor HTTP.
   - `web/estatico/`: la página, en tres archivos (`index.html`, `estilos.css`, `app.js`), sin librerías ni build.
   - `fuentes/`: trae datos de afuera (indicadores, acciones, noticias).
-  - `dominio/`: reglas de negocio (resumen, corrector, caja de preguntas, servicio).
-  - `almacen/`: acceso a lo que se guarda (preferencias, gustos, resúmenes).
+  - `dominio/`: reglas de negocio (resumen, corrector, caja de preguntas, pedido, progreso, selección por puntaje, perfil de gustos, servicio).
+  - `almacen/`: acceso a lo que se guarda (preferencias v2, gustos, resúmenes).
 - `tests/`: tests con `unittest` y `tests/fixtures/`; `tests/e2e/` tiene las pruebas opcionales de la página.
 - `docs/`: [plan](docs/plan.md), [investigación de fuentes](docs/investigacion.md) y [preferencias](docs/preferencias.md).
 - `specs/`: una spec por tarea; arrancá por [specs/README.md](specs/README.md).
@@ -77,7 +84,7 @@ Más detalle en [docs/plan.md](docs/plan.md).
 
 ## Fuentes de datos
 
-DolarApi, ArgentinaDatos, BCRA (v4.0), Rava y data912 para los números; RSS de Infobae, Página/12, Ámbito, Olé y elDiarioAR para las noticias. Detalle, condiciones y fechas de verificación en [docs/investigacion.md](docs/investigacion.md).
+DolarApi, ArgentinaDatos, BCRA (v4.0), Rava y data912 para los números; RSS de Infobae, Página/12, Ámbito, Olé, elDiarioAR, Perfil, iProfesional y El Cronista para las noticias. Detalle, condiciones y fechas de verificación en [docs/investigacion.md](docs/investigacion.md).
 
 ## Cómo contribuir
 

@@ -13,7 +13,7 @@ Reglas de CLAUDE.md que se ven en estas formas:
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class Indicador(TypedDict):
@@ -40,6 +40,9 @@ class Nota(TypedDict):
     seccion: str
     fecha: str
     link: str
+    bajada: NotRequired[str]  # spec 38: description del RSS, limpia; ausente en datos viejos
+    categorias: NotRequired[list[str]]  # spec 38: category del RSS; ausente en datos viejos
+    subtema: NotRequired[str]  # spec 45: solo en notas de Deportes
 
 
 class NotaDeFeed(TypedDict):
@@ -50,14 +53,22 @@ class NotaDeFeed(TypedDict):
     fecha: Any  # datetime
     medio: str
     seccion: str
+    bajada: NotRequired[str]
+    categorias: NotRequired[list[str]]
+    subtema: NotRequired[str]  # spec 45: solo en notas de Deportes
 
 
-class FuenteRSS(TypedDict):
-    """Un feed RSS de micafe/config.py."""
-
+class _FuenteRSSBase(TypedDict):
     medio: str
     seccion: str
     url: str
+
+
+class FuenteRSS(_FuenteRSSBase, total=False):
+    """Un feed RSS de micafe/config.py. `reclasificar_por_categoria` es opcional (spec 44)."""
+
+    reclasificar_por_categoria: bool
+    subtema: str  # spec 45: subtema de Deportes que declara el feed
 
 
 class FallaDeFuente(TypedDict):
@@ -118,11 +129,39 @@ class ResultadoMerval(TypedDict):
     avisos: list[str]
 
 
-class Preferencias(TypedDict):
-    """Lo guardado en datos/preferencias.json: claves de indicadores y nombres de temas elegidos."""
+class PreferenciasV1(TypedDict):
+    """El formato viejo de datos/preferencias.json: claves de indicadores y nombres de temas elegidos."""
 
     indicadores: list[str]
     temas: list[str]
+
+
+class PreferenciaDeTema(TypedDict):
+    """Un tema en las preferencias v2: si está activo y qué prioridad tiene ("alta", "normal" o "baja")."""
+
+    activo: bool
+    prioridad: str
+
+
+class MediosPreferidos(TypedDict):
+    preferidos: list[str]
+    excluidos: list[str]
+
+
+class PalabrasPreferidas(TypedDict):
+    seguir: list[str]
+    evitar: list[str]
+
+
+class Preferencias(TypedDict):
+    """Lo guardado en datos/preferencias.json (esquema v2, spec 49). `temas` trae todos los de config.TEMAS."""
+
+    version: int
+    temas: dict[str, PreferenciaDeTema]
+    subtemas: list[str]
+    medios: MediosPreferidos
+    palabras: PalabrasPreferidas
+    indicadores: list[str]
 
 
 class _VotoBase(TypedDict):
@@ -141,6 +180,15 @@ class Voto(_VotoBase, total=False):
     titulo: str
     medio: str
     seccion: str
+
+
+class Perfil(TypedDict):
+    """Lo que el código aprendió de los votos (spec 41): puntajes entre -TOPE_PERFIL y +TOPE_PERFIL."""
+
+    secciones: dict[str, float]
+    medios: dict[str, float]
+    terminos: dict[str, float]
+    votos_contados: int  # votos que cuentan (sin los anteriores al reinicio ni los de fecha ilegible o futura)
 
 
 class Chequeo(TypedDict):
@@ -169,6 +217,45 @@ class NotaDelResumen(TypedDict):
     link: str
 
 
+class NotaPuntuada(TypedDict):
+    """Una candidata con su puntaje y los motivos cortos de ese puntaje (spec 39)."""
+
+    nota: Nota
+    puntaje: float
+    motivos: list[str]
+    encaja: bool  # True si algún término del pedido aparece en la nota
+
+
+class Seleccion(TypedDict):
+    """Resultado de seleccion.elegir_candidatas (spec 39).
+
+    `motivos` va por link y solo trae las notas que sumaron puntaje; `encajan` son los links
+    de las notas que encajan con el pedido.
+    """
+
+    candidatas: list[Nota]
+    motivos: dict[str, list[str]]
+    encajan: list[str]
+    pedido_sin_notas: bool
+
+
+class CupoSeccion(TypedDict):
+    """Cuántas notas lleva una sección en el plan del día (spec 40)."""
+
+    seccion: str
+    cupo: int
+    pedidas: int  # notas [pedido] que la sección tiene entre las candidatas
+    motivos: list[str]  # por qué el cupo quedó así (pedido, falta de notas, tope por medio)
+    prioridad: NotRequired[str]  # spec 49: "alta" o "baja"; ausente si es "normal"
+
+
+class PlanDelDia(TypedDict):
+    """El plan que se guarda en el resumen: secciones con su cupo y si llegó a NOTAS_OBJETIVO."""
+
+    secciones: list[CupoSeccion]
+    completo: bool
+
+
 class ResumenGuardado(TypedDict):
     """Lo guardado en datos/resumenes/AAAA-MM-DD.json."""
 
@@ -178,6 +265,8 @@ class ResumenGuardado(TypedDict):
     texto: str
     chequeo: Chequeo
     pedido: NotRequired[str]  # solo si la persona pidió algo ese día (spec 35)
+    pedido_sin_notas: NotRequired[bool]  # spec 39: True si había pedido y ninguna nota encajó
+    plan: NotRequired[PlanDelDia]  # spec 40; los resúmenes viejos no lo tienen
     notas: NotRequired[list[NotaDelResumen]]  # se calculan al responder, no se guardan en el archivo
 
 

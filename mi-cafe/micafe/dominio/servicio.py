@@ -14,15 +14,17 @@ from typing import Any, Callable
 
 from micafe.almacen import gustos, preferencias, resumenes
 from micafe.config import (
-    ARCHIVO_ACCIONES, ARCHIVO_GUSTOS, ARCHIVO_INDICADORES, ARCHIVO_PREFERENCIAS, CARPETA_RESUMENES, ZONA,
+    ARCHIVO_ACCIONES, ARCHIVO_GUSTOS, ARCHIVO_INDICADORES, ARCHIVO_PREFERENCIAS, CANDIDATAS_POR_MEDIO_Y_SECCION,
+    CANDIDATAS_POR_MEDIO_Y_SECCION_LUNES, CARPETA_RESUMENES, MAXIMO_CARACTERES_PALABRA, MAXIMO_PALABRAS_PREFERENCIA,
+    PRIORIDADES_TEMA, SUBTEMAS, TEMAS, TOPE_POR_MEDIO_LUNES, ZONA,
 )
-from micafe.dominio import caja, corrector, resumen
+from micafe.dominio import caja, corrector, perfil, resumen, seleccion
 from micafe.dominio.pedido import validar_pedido
 from micafe.dominio.progreso import Progreso
 from micafe.errores import ErrorAlmacenamiento, ErrorMiCafe, ErrorResumen
 from micafe.fuentes import acciones, indicadores, noticias
 from micafe.modelos import (
-    Preferencias, RespuestaDePregunta, ResultadoIndicadores, ResultadoNoticias, ResumenGuardado, Voto,
+    Perfil, Preferencias, RespuestaDePregunta, ResultadoIndicadores, ResultadoNoticias, ResumenGuardado, Voto,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,8 +58,16 @@ def leer_preferencias() -> tuple[Preferencias, str | None]:
 
 
 def opciones_de_preferencias() -> dict[str, Any]:
-    """Las opciones cerradas de indicadores y temas que la página ofrece (ver preferencias.OPCIONES)."""
-    return preferencias.OPCIONES
+    """Las opciones cerradas que la página ofrece (spec 49): el front no copia listas ni topes."""
+    return {
+        "indicadores": preferencias.INDICADORES,
+        "secciones": list(TEMAS),
+        "subtemas": list(SUBTEMAS),
+        "medios": preferencias.medios_disponibles(),
+        "prioridades": list(PRIORIDADES_TEMA),
+        "maximo_palabras": MAXIMO_PALABRAS_PREFERENCIA,
+        "maximo_caracteres": MAXIMO_CARACTERES_PALABRA,
+    }
 
 
 def guardar_preferencias(datos: Any) -> tuple[Preferencias | None, list[str]]:
@@ -77,10 +87,19 @@ def obtener_indicadores() -> ResultadoIndicadores:
     return indicadores_con_acciones(datos, prefs)
 
 
-def obtener_noticias() -> ResultadoNoticias:
-    """Las notas de ayer de los temas elegidos, con link, y las fuentes que fallaron."""
+def obtener_noticias(ahora: datetime | None = None) -> ResultadoNoticias:
+    """Las notas de ayer de los temas elegidos, con link, y las fuentes que fallaron.
+
+    Spec 42: vienen ordenadas por el puntaje del servidor (el pedido de hoy, si hay, y los gustos)
+    y cada nota trae `motivos`.
+    """
+    ahora = ahora or datetime.now(ZONA)
     prefs, _ = preferencias.leer(ARCHIVO_PREFERENCIAS)
-    return noticias.obtener(prefs["temas"])
+    datos = noticias.obtener(preferencias.temas_activos(prefs))
+    guardado = resumenes.leer_ultimo(CARPETA_RESUMENES)
+    pedido = guardado.get("pedido") if guardado and guardado.get("fecha") == ahora.date().isoformat() else None
+    terminos = seleccion.terminos_del_pedido(pedido if isinstance(pedido, str) else None)
+    return {**datos, "notas": seleccion.ordenar_por_puntaje(datos["notas"], terminos, _perfil(ahora), prefs)}
 
 
 def ultimo_resumen() -> ResumenGuardado | None:
@@ -90,8 +109,16 @@ def ultimo_resumen() -> ResumenGuardado | None:
 
 
 def _con_notas(guardado: ResumenGuardado) -> ResumenGuardado:
-    """Suma `notas` (calculadas, no guardadas en el archivo) para poder votarlas (spec 31)."""
-    return {**guardado, "notas": corrector.notas_votables(guardado.get("texto"))}
+    """Suma `notas` (calculadas, no guardadas en el archivo) para poder votarlas (spec 31).
+
+    Spec 42: si el pedido no encontró notas, suma `temas_destildados_pedido` (los temas que el
+    pedido nombra y que hoy están destildados) para que la página explique por qué.
+    """
+    extra: dict[str, Any] = {"notas": corrector.notas_votables(guardado.get("texto"))}
+    if guardado.get("pedido_sin_notas") is True and isinstance(guardado.get("pedido"), str):
+        prefs, _ = preferencias.leer(ARCHIVO_PREFERENCIAS)
+        extra["temas_destildados_pedido"] = seleccion.temas_destildados_nombrados(guardado["pedido"], preferencias.temas_activos(prefs))
+    return {**guardado, **extra}
 
 
 def leer_votos() -> tuple[list[Voto], str | None]:
@@ -106,6 +133,42 @@ def guardar_voto(datos: Any) -> tuple[list[Voto] | None, list[str]]:
     except OSError as error:
         logger.error(f"Aviso: no se pudo guardar el voto. Detalle: {error}")
         raise ErrorAlmacenamiento("No se pudo guardar el voto. Revisá los permisos de la carpeta datos/.") from error
+
+
+def _perfil(ahora: datetime | None = None) -> Perfil:
+    """El perfil de gustos de hoy. Si gustos.json falta o está roto, es un perfil vacío y todo sigue."""
+    votos, _ = gustos.leer(ARCHIVO_GUSTOS)
+    return perfil.calcular(votos, ahora or datetime.now(ZONA), gustos.leer_reinicio(ARCHIVO_GUSTOS))
+
+
+def _perfil_para_mostrar(calculado: Perfil) -> dict[str, Any]:
+    """El perfil en formato apto para mostrar: prioridades con signo y etiqueta, sin puntajes."""
+    return {
+        "prioridades": perfil.prioridades(calculado),
+        "reiniciado_en": gustos.leer_reinicio(ARCHIVO_GUSTOS),
+        "votos_que_cuentan": calculado["votos_contados"],
+    }
+
+
+def obtener_perfil() -> dict[str, Any]:
+    """Lo aprendido de los votos, para mostrar (spec 41). Sin votos, las listas vienen vacías."""
+    return _perfil_para_mostrar(_perfil())
+
+
+def reiniciar_perfil(datos: Any) -> tuple[dict[str, Any] | None, list[str]]:
+    """Ignora lo aprendido hasta ahora (no borra votos). Devuelve `(perfil, errores)`.
+
+    Exige `{"confirmar": true}`. Levanta ErrorAlmacenamiento si no puede escribir.
+    """
+    if not isinstance(datos, dict) or datos.get("confirmar") is not True:
+        return None, ["Confirmá el reinicio para ignorar lo aprendido."]
+    try:
+        gustos.reiniciar(ARCHIVO_GUSTOS)
+    except OSError as error:
+        logger.error(f"Aviso: no se pudo reiniciar lo aprendido. Detalle: {error}")
+        raise ErrorAlmacenamiento("No se pudo reiniciar lo aprendido. Revisá los permisos de la carpeta datos/.") from error
+    logger.info("Lo aprendido se reinició")
+    return obtener_perfil(), []
 
 
 def responder_pregunta(datos: Any) -> RespuestaDePregunta:
@@ -143,17 +206,37 @@ def preparar_resumen(ahora: datetime | None = None,
     ahora = ahora or datetime.now(ZONA)
     prefs, _ = preferencias.leer(ARCHIVO_PREFERENCIAS)
     marcar("noticias")
-    datos_noticias = noticias.obtener(prefs["temas"])
+    temas_elegidos = preferencias.temas_activos(prefs)
+    datos_noticias = noticias.obtener(temas_elegidos)
     marcar("indicadores")
     datos_indicadores = indicadores.obtener(ARCHIVO_INDICADORES, prefs["indicadores"])
     datos_indicadores = indicadores_con_acciones(datos_indicadores, prefs)
     lista_indicadores = datos_indicadores["indicadores"]
     # Avisos de fuentes caídas o datos viejos: la página los muestra junto al resumen (spec 12).
     avisos = {"indicadores": datos_indicadores["avisos"], "noticias": datos_noticias["fallas"]}
-    notas = datos_noticias["notas"]
-    # Si gustos.json falta o está roto, leer() devuelve [] y el resumen sale igual.
-    votos_gustos, _ = gustos.leer(ARCHIVO_GUSTOS)
-    lineas_gustos = gustos.lineas_para_pedido(votos_gustos)
+    # Spec 41: lo aprendido de los votos (con peso decreciente en el tiempo) entra a la selección y al plan.
+    perfil_de_hoy = _perfil(ahora)
+    # Spec 39: el código ordena las candidatas con el pedido y le pasa a Claude las mejores.
+    terminos = seleccion.terminos_del_pedido(pedido)
+    cupo = (CANDIDATAS_POR_MEDIO_Y_SECCION_LUNES if datos_noticias["tope_por_medio"] == TOPE_POR_MEDIO_LUNES
+            else CANDIDATAS_POR_MEDIO_Y_SECCION)
+    elegidas = seleccion.elegir_candidatas(datos_noticias["notas"], prefs, terminos, perfil_de_hoy,
+                                           tope_por_medio_y_seccion=cupo)
+    notas = elegidas["candidatas"]
+    pedidas = {link: elegidas["motivos"].get(link, []) for link in elegidas["encajan"]}
+    pedido_sin_notas = elegidas["pedido_sin_notas"]
+    if terminos:  # solo cantidades: nunca el pedido, los términos ni los sinónimos
+        logger.info("Pedido: encajaron %d notas de %d candidatas", len(pedidas), len(notas))
+    # Spec 40: el código calcula cuántas notas lleva cada sección; Claude y el corrector siguen ese plan.
+    secciones_plan = seleccion.plan_de_secciones(notas, temas_elegidos, seleccion.pesos_de_secciones(perfil_de_hoy), datos_noticias["tope_por_medio"],
+                                                 pedidas=set(pedidas), prioridades=preferencias.prioridades_de_temas(prefs))
+    completo = seleccion.plan_completo(secciones_plan) if secciones_plan else True  # sin plan, se exige el largo de siempre
+    plan_guardado = {"secciones": secciones_plan, "completo": completo} if secciones_plan else None
+    lineas_prioridades = perfil.lineas_para_pedido(perfil_de_hoy)
+    logger.info("Preferencias: %d medios preferidos, %d excluidos, %d palabras a seguir, %d a evitar, %d subtemas",
+                len(prefs["medios"]["preferidos"]), len(prefs["medios"]["excluidos"]),
+                len(prefs["palabras"]["seguir"]), len(prefs["palabras"]["evitar"]), len(prefs["subtemas"]))  # solo cantidades
+    logger.info("Perfil: %d votos cuentan, %d prioridades al prompt", perfil_de_hoy["votos_contados"], len(lineas_prioridades))
 
     redacciones = 0
 
@@ -165,11 +248,14 @@ def preparar_resumen(ahora: datetime | None = None,
         texto = resumen.generar(
             notas,
             tope=datos_noticias["tope_por_medio"],
-            indicadores=lista_indicadores,
             correcciones=correcciones,
             borrador=borrador,
-            gustos=lineas_gustos,
+            prioridades=lineas_prioridades,
+            preferencias=prefs,
             pedido=pedido,
+            pedidas=pedidas,
+            plan=secciones_plan or None,
+            plan_completo=completo,
         )
         marcar("corrigiendo")
         return texto
@@ -179,8 +265,10 @@ def preparar_resumen(ahora: datetime | None = None,
             redactar,
             notas,
             tope=datos_noticias["tope_por_medio"],
-            palabras_indicadores=resumen.palabras_indicadores(lista_indicadores),
             previos=resumenes.leer_previos(CARPETA_RESUMENES, anteriores_a=ahora.astimezone(ZONA).date().isoformat()),
+            plan=secciones_plan or None,
+            plan_completo=completo,
+            pedidas=list(pedidas),
             verificar_modelo=lambda texto: corrector.verificar_con_modelo(texto, notas),
         )
     except resumen.ErrorResumen as error:
@@ -190,7 +278,7 @@ def preparar_resumen(ahora: datetime | None = None,
     try:
         registro = resumenes.guardar(
             revision["texto"], lista_indicadores, revision["chequeo"], ahora, CARPETA_RESUMENES,
-            pedido=pedido,
+            pedido=pedido, pedido_sin_notas=pedido_sin_notas, plan=plan_guardado,
         )
     except OSError as error:
         logger.error(f"Aviso: no se pudo guardar el resumen. Detalle: {error}")

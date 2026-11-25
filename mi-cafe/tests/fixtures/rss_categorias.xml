@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Feed general con categorías</title>
+  <item><title>Nota de sociedad</title><link>https://medio.test/sociedad</link><pubDate>Tue, 17 Nov 2026 09:00:00 -0300</pubDate><category>Sociedad</category></item>
+  <item><title>Nota de política</title><link>https://medio.test/politica</link><pubDate>Tue, 17 Nov 2026 10:00:00 -0300</pubDate><category>Política</category></item>
+  <item><title>Nota de ciencia</title><link>https://medio.test/ciencia</link><pubDate>Tue, 17 Nov 2026 11:00:00 -0300</pubDate><category>Opinión</category><category>Ciencia</category></item>
+  <item><title>Categoría desconocida</title><link>https://medio.test/rara</link><pubDate>Tue, 17 Nov 2026 12:00:00 -0300</pubDate><category>Farándula VIP</category></item>
+  <item><title>Sin categoría</title><link>https://medio.test/sin</link><pubDate>Tue, 17 Nov 2026 13:00:00 -0300</pubDate></item>
+</channel></rss>

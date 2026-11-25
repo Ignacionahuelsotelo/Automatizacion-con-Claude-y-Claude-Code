@@ -106,16 +106,79 @@ class Preferencias(ServidorDePrueba):
     def test_get_sin_archivo_devuelve_las_de_por_defecto_y_las_opciones(self):
         codigo, datos = self.json("GET", "/api/preferencias")
         self.assertEqual(codigo, 200)
-        self.assertEqual(datos["preferencias"]["temas"], ["Política", "Economía", "Deportes", "Tecnología"])
+        self.assertEqual(datos["preferencias"]["version"], 2)
+        self.assertEqual([t for t, v in datos["preferencias"]["temas"].items() if v["activo"]],
+                         ["Política", "Economía", "Internacional", "Deportes", "Tecnología"])
         self.assertIn("opciones", datos)
         self.assertIsNone(datos["aviso"])
+
+    def test_las_opciones_traen_las_secciones_de_config(self):
+        from micafe import config
+        datos = self.json("GET", "/api/preferencias")[1]
+        self.assertEqual(datos["opciones"]["secciones"], config.TEMAS)
+        self.assertIn("Internacional", datos["opciones"]["secciones"])
+
+    def test_las_opciones_v2_estan_completas(self):
+        from micafe import config
+        from micafe.textos import normalizar_texto
+        opciones = self.json("GET", "/api/preferencias")[1]["opciones"]
+        self.assertEqual(set(opciones), {"indicadores", "secciones", "subtemas", "medios", "prioridades",
+                                         "maximo_palabras", "maximo_caracteres"})
+        self.assertEqual(opciones["subtemas"], list(config.SUBTEMAS))
+        self.assertEqual(opciones["prioridades"], ["alta", "normal", "baja"])
+        self.assertEqual(opciones["maximo_palabras"], config.MAXIMO_PALABRAS_PREFERENCIA)
+        self.assertEqual(opciones["maximo_caracteres"], config.MAXIMO_CARACTERES_PALABRA)
+        self.assertEqual(opciones["medios"], sorted(set(opciones["medios"]), key=normalizar_texto))
+        self.assertIn("Perfil", opciones["medios"])
+        self.assertIn("dolar_otros", opciones["indicadores"])
+
+    def test_post_v2_guarda_y_devuelve_v2_y_los_errores_son_400_en_espanol(self):
+        cuerpo = {"version": 2, "temas": {"Deportes": {"activo": True, "prioridad": "alta"}}, "subtemas": ["Tenis"],
+                  "medios": {"preferidos": [], "excluidos": ["Perfil"]}, "palabras": {"seguir": ["Boca"], "evitar": []},
+                  "indicadores": ["dolar"]}
+        codigo, datos = self.json("POST", "/api/preferencias", cuerpo)
+        self.assertEqual(codigo, 200)
+        self.assertEqual(datos["preferencias"]["medios"]["excluidos"], ["Perfil"])
+        self.assertEqual(self.json("GET", "/api/preferencias")[1]["preferencias"], datos["preferencias"])
+        malo = {**cuerpo, "temas": {"Deportes": {"activo": True, "prioridad": "altísima"}}}
+        codigo, datos = self.json("POST", "/api/preferencias", malo)
+        self.assertEqual(codigo, 400)
+        self.assertFalse(datos["ok"])
+        self.assertIn("altísima", datos["errores"][0])
+        self.assertEqual(self.json("GET", "/api/preferencias")[1]["preferencias"]["temas"]["Deportes"]["prioridad"], "alta")
+
+    def test_lo_que_arma_la_pantalla_se_guarda_y_los_topes_se_rechazan(self):
+        """Spec 50: la pantalla reenvía el v2 entero del GET con cambios, usando solo `opciones`."""
+        datos = self.json("GET", "/api/preferencias")[1]
+        opciones, prefs = datos["opciones"], datos["preferencias"]
+        self.assertEqual(list(prefs["temas"]), opciones["secciones"])
+        self.assertTrue(set(prefs["indicadores"]) <= set(opciones["indicadores"]))
+        medio = opciones["medios"][0]
+        prefs["temas"][opciones["secciones"][0]] = {"activo": False, "prioridad": opciones["prioridades"][2]}
+        prefs["medios"]["excluidos"] = [medio]
+        prefs["palabras"]["seguir"] = ["<b>Boca</b>"]
+        codigo, respuesta = self.json("POST", "/api/preferencias", prefs)
+        self.assertEqual(codigo, 200)
+        guardadas = self.json("GET", "/api/preferencias")[1]["preferencias"]
+        self.assertEqual(guardadas, respuesta["preferencias"])
+        self.assertEqual(guardadas["medios"]["excluidos"], [medio])
+        self.assertEqual(guardadas["palabras"]["seguir"], ["<b>Boca</b>"])
+        # Los topes que le llegan a la pantalla son los que el servidor hace valer.
+        largo = {**guardadas, "palabras": {"seguir": ["a" * (opciones["maximo_caracteres"] + 1)], "evitar": []}}
+        self.assertEqual(self.json("POST", "/api/preferencias", largo)[0], 400)
+        muchas = {**guardadas, "palabras": {"seguir": [f"p{i}" for i in range(opciones["maximo_palabras"] + 1)], "evitar": []}}
+        self.assertEqual(self.json("POST", "/api/preferencias", muchas)[0], 400)
+        sin_temas = {**guardadas, "temas": {t: {"activo": False, "prioridad": "normal"} for t in opciones["secciones"]}}
+        codigo, respuesta = self.json("POST", "/api/preferencias", sin_temas)
+        self.assertEqual((codigo, respuesta["errores"]), (400, ["Elegí al menos un tema."]))
 
     def test_post_valido_guarda_en_la_carpeta_temporal(self):
         codigo, datos = self.json("POST", "/api/preferencias", {"indicadores": ["dolar"], "temas": ["Deportes"]})
         self.assertEqual(codigo, 200)
         self.assertTrue(datos["ok"])
         self.assertTrue(os.path.exists(os.path.join(self.datos, "preferencias.json")))
-        self.assertEqual(self.json("GET", "/api/preferencias")[1]["preferencias"]["temas"], ["Deportes"])
+        prefs = self.json("GET", "/api/preferencias")[1]["preferencias"]
+        self.assertEqual([t for t, v in prefs["temas"].items() if v["activo"]], ["Deportes"])
 
     def test_json_invalido_es_400_en_espanol(self):
         codigo, datos = self.json("POST", "/api/preferencias", "esto no es json")
@@ -126,6 +189,12 @@ class Preferencias(ServidorDePrueba):
         for ruta in ("/api/gustos", "/api/preguntas"):
             with self.subTest(ruta=ruta):
                 self.assertEqual(self.json("POST", ruta, "{roto")[0], 400)
+
+    def test_temas_vacios_es_400_con_el_mensaje_en_espanol(self):
+        codigo, datos = self.json("POST", "/api/preferencias", {"indicadores": ["dolar"], "temas": []})
+        self.assertEqual(codigo, 400)
+        self.assertEqual(datos["errores"], ["Elegí al menos un tema."])
+        self.assertFalse(os.path.exists(os.path.join(self.datos, "preferencias.json")))
 
     def test_valor_desconocido_es_400_con_el_motivo(self):
         codigo, datos = self.json("POST", "/api/preferencias", {"indicadores": ["bitcoin"], "temas": []})
@@ -139,7 +208,7 @@ class PreferenciasConcurrentes(ServidorDePrueba):
 
     def test_veinte_post_concurrentes_dan_200_y_dejan_un_archivo_valido(self):
         combinaciones = [{"indicadores": ["dolar", "riesgo_pais", "acciones"][: n % 4],
-                          "temas": ["Política", "Economía", "Deportes", "Tecnología"][: (n + 1) % 5]}
+                          "temas": ["Política", "Economía", "Internacional", "Deportes", "Tecnología"][: 1 + n % 5]}
                          for n in range(20)]
         # 8 hilos a la vez: la cola de escucha del servidor (COLA_DE_ESCUCHA) los aguanta.
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -147,12 +216,14 @@ class PreferenciasConcurrentes(ServidorDePrueba):
         self.assertEqual([codigo for codigo, _ in resultados], [200] * 20)
         with open(os.path.join(self.datos, "preferencias.json"), encoding="utf-8") as archivo:
             final = json.load(archivo)
-        self.assertIn(final, combinaciones)
+        self.assertEqual(final["version"], 2)
+        self.assertIn({"indicadores": final["indicadores"],
+                       "temas": [t for t, v in final["temas"].items() if v["activo"]]}, combinaciones)
         self.assertEqual(os.listdir(self.datos), ["preferencias.json"])  # sin .tmp sueltos
 
     def test_todo_subconjunto_se_guarda_y_deja_andar_indicadores_y_noticias(self):
-        def subconjuntos(lista):
-            return [list(c) for n in range(len(lista) + 1) for c in itertools.combinations(lista, n)]
+        def subconjuntos(lista, minimo=0):
+            return [list(c) for n in range(minimo, len(lista) + 1) for c in itertools.combinations(lista, n)]
 
         base = {"indicadores": [], "generado_en": "x", "avisos": []}
         extra = {"indicadores": [], "avisos": []}
@@ -161,7 +232,7 @@ class PreferenciasConcurrentes(ServidorDePrueba):
                 mock.patch.object(servicio.acciones, "obtener_todo", return_value=extra), \
                 mock.patch.object(servicio.noticias, "obtener", return_value=salida):
             for indicadores in subconjuntos(["dolar", "riesgo_pais", "acciones"]):
-                for temas in subconjuntos(["Política", "Economía", "Deportes", "Tecnología"]):
+                for temas in subconjuntos(["Política", "Economía", "Internacional", "Deportes", "Tecnología"], 1):
                     with self.subTest(indicadores=indicadores, temas=temas):
                         cuerpo = {"indicadores": indicadores, "temas": temas}
                         self.assertEqual(self.json("POST", "/api/preferencias", cuerpo)[0], 200)
@@ -226,6 +297,25 @@ class ResumenGuardado(ServidorDePrueba):
             guardado = json.load(archivo)
         self.assertIn("Título uno", json.dumps(guardado, ensure_ascii=False))
 
+    def test_get_expone_plan_pedido_y_pedido_sin_notas(self):
+        plan = {"secciones": [{"seccion": "Deportes", "cupo": 2, "pedidas": 0, "motivos": []}], "completo": False}
+        self.guardar_resumen_en_disco({**RESUMEN, "pedido": "tecnología", "pedido_sin_notas": True, "plan": plan})
+        resumen = self.json("GET", "/api/resumen")[1]["resumen"]
+        self.assertEqual((resumen["pedido"], resumen["pedido_sin_notas"], resumen["plan"]), ("tecnología", True, plan))
+
+    def test_pedido_sin_notas_avisa_que_temas_destildados_nombra(self):
+        self.json("POST", "/api/preferencias", {"indicadores": [], "temas": ["Política", "Deportes"]})
+        self.guardar_resumen_en_disco({**RESUMEN, "pedido": "Tecnología y economía", "pedido_sin_notas": True})
+        resumen = self.json("GET", "/api/resumen")[1]["resumen"]
+        self.assertEqual(resumen["temas_destildados_pedido"], ["Economía", "Tecnología"])
+
+    def test_resumen_viejo_sin_esos_campos_responde_200(self):
+        self.guardar_resumen_en_disco(RESUMEN)
+        codigo, datos = self.json("GET", "/api/resumen")
+        self.assertEqual(codigo, 200)
+        for campo in ("plan", "pedido", "pedido_sin_notas", "temas_destildados_pedido"):
+            self.assertNotIn(campo, datos["resumen"])
+
     def test_get_saltea_un_resumen_roto(self):
         self.guardar_resumen_en_disco({**RESUMEN, "fecha": "2026-11-16"})
         with open(os.path.join(self.resumenes, "2026-11-17.json"), "w", encoding="utf-8") as archivo:
@@ -247,7 +337,7 @@ class Indicadores(ServidorDePrueba):
         acciones.assert_called_once()
 
     def test_sin_acciones_elegidas_no_se_consulta_acciones(self):
-        self.json("POST", "/api/preferencias", {"indicadores": ["dolar"], "temas": []})
+        self.json("POST", "/api/preferencias", {"indicadores": ["dolar"], "temas": ["Deportes"]})
         base = {"indicadores": [], "generado_en": "x", "avisos": []}
         with mock.patch.object(servicio.indicadores, "obtener", return_value=base), \
                 mock.patch.object(servicio.acciones, "obtener_todo") as acciones:
@@ -283,6 +373,56 @@ class Noticias(ServidorDePrueba):
         obtener.assert_called_once_with(["Deportes"])
 
 
+class NoticiasOrdenadas(ServidorDePrueba):
+    def nota(self, titulo, fecha, medio="Medio A", seccion="Deportes"):
+        return {"titulo": titulo, "medio": medio, "seccion": seccion, "fecha": fecha, "link": f"https://x.test/{titulo}"}
+
+    def pedir_noticias(self, notas):
+        salida = {"notas": notas, "fallas": [], "ventana": {}, "tope_por_medio": 3, "generado_en": "x"}
+        with mock.patch.object(servicio.noticias, "obtener", return_value=salida):
+            return self.json("GET", "/api/noticias")
+
+    def test_sin_pedido_va_por_frescura_y_trae_motivos(self):
+        vieja = self.nota("vieja", "17/11/2026 08:00")
+        nueva = self.nota("nueva", "17/11/2026 22:00")
+        codigo, datos = self.pedir_noticias([vieja, nueva])
+        self.assertEqual(codigo, 200)
+        self.assertEqual([n["titulo"] for n in datos["notas"]], ["nueva", "vieja"])
+        self.assertEqual(datos["notas"][0]["motivos"], ["frescura"])
+        self.assertEqual(datos["notas"][1]["motivos"], [])
+        self.assertNotIn("puntaje", datos["notas"][0])
+
+    def test_con_el_pedido_de_hoy_las_que_encajan_van_primero(self):
+        hoy = servicio.datetime.now(servicio.ZONA).date().isoformat()
+        self.guardar_resumen_en_disco({**RESUMEN, "fecha": hoy, "pedido": "river"})
+        otra = self.nota("tenis en Australia", "17/11/2026 22:00")
+        river = self.nota("River goleó", "17/11/2026 08:00")
+        datos = self.pedir_noticias([otra, river])[1]
+        self.assertEqual(datos["notas"][0]["titulo"], "River goleó")
+        self.assertTrue(any(m.startswith("pedido:") for m in datos["notas"][0]["motivos"]))
+
+    def test_subtema_solo_en_las_notas_de_deportes(self):
+        dep = {**self.nota("partido", "17/11/2026 22:00"), "subtema": "Tenis"}
+        pol = self.nota("ley", "17/11/2026 21:00", seccion="Política")
+        notas = {n["titulo"]: n for n in self.pedir_noticias([dep, pol])[1]["notas"]}
+        self.assertEqual(notas["partido"]["subtema"], "Tenis")
+        self.assertNotIn("subtema", notas["ley"])
+
+    def test_el_pedido_de_otro_dia_no_cuenta(self):
+        self.guardar_resumen_en_disco({**RESUMEN, "fecha": "2020-01-01", "pedido": "river"})
+        datos = self.pedir_noticias([self.nota("tenis", "17/11/2026 22:00"), self.nota("River goleó", "17/11/2026 08:00")])[1]
+        self.assertEqual(datos["notas"][0]["titulo"], "tenis")
+
+    def test_un_medio_con_votos_positivos_muestra_medio_que_te_gusta(self):
+        for i in range(4):
+            self.json("POST", "/api/gustos", {"tipo": "nota", "clave": f"https://x.test/v{i}", "voto": "me_gusta",
+                                             "titulo": f"voto {i}", "medio": "Medio B", "seccion": "Deportes"})
+        datos = self.pedir_noticias([self.nota("a", "17/11/2026 10:00", medio="Medio A"),
+                                     self.nota("b", "17/11/2026 10:00", medio="Medio B")])[1]
+        self.assertEqual(datos["notas"][0]["medio"], "Medio B")
+        self.assertIn("medio que te gusta", datos["notas"][0]["motivos"])
+
+
 class LogYErrores(ServidorDePrueba):
     def test_error_inesperado_va_al_log_con_traza_y_no_a_la_pagina(self):
         with mock.patch.object(servicio.preferencias, "leer", side_effect=RuntimeError("secreto técnico")):
@@ -310,6 +450,46 @@ class LogYErrores(ServidorDePrueba):
         self.assertTrue(registro.output)
         self.assertNotIn("Traceback", json.dumps(datos))
         self.assertNotIn(".py", json.dumps(datos))
+
+
+class Perfil(ServidorDePrueba):
+    def votar(self, **voto):
+        self.assertEqual(self.json("POST", "/api/gustos", voto)[0], 200)
+
+    def test_get_sin_votos_responde_200_con_listas_vacias(self):
+        codigo, datos = self.json("GET", "/api/perfil")
+        self.assertEqual(codigo, 200)
+        self.assertEqual(datos, {"ok": True, "prioridades": [], "reiniciado_en": None, "votos_que_cuentan": 0})
+
+    def test_get_con_votos_trae_prioridades_en_espanol_sin_numeros(self):
+        for _ in range(2):
+            self.votar(tipo="tema", clave="Economía", voto="me_gusta")
+        datos = self.json("GET", "/api/perfil")[1]
+        self.assertEqual(datos["votos_que_cuentan"], 1)
+        self.assertEqual(datos["prioridades"][0]["etiqueta"], "Te interesa más Economía")
+        self.assertEqual(datos["prioridades"][0]["signo"], 1)
+
+    def test_reiniciar_sin_confirmacion_es_400_en_espanol(self):
+        for cuerpo in (None, {}, {"confirmar": False}, {"confirmar": "true"}, [True]):
+            codigo, datos = self.json("POST", "/api/perfil/reiniciar", cuerpo)
+            self.assertEqual(codigo, 400)
+            self.assertEqual(datos["errores"], ["Confirmá el reinicio para ignorar lo aprendido."])
+
+    def test_reiniciar_con_cuerpo_mal_formado_es_400(self):
+        self.assertEqual(self.pedir("POST", "/api/perfil/reiniciar", "{roto")[0], 400)
+
+    def test_reiniciar_deja_el_perfil_vacio_y_conserva_los_votos(self):
+        self.votar(tipo="tema", clave="Economía", voto="me_gusta")
+        codigo, datos = self.json("POST", "/api/perfil/reiniciar", {"confirmar": True})
+        self.assertEqual(codigo, 200)
+        self.assertEqual(datos["prioridades"], [])
+        self.assertEqual(datos["votos_que_cuentan"], 0)
+        self.assertTrue(datos["reiniciado_en"])
+        with open(os.path.join(self.datos, "gustos.json"), encoding="utf-8") as archivo:
+            guardado = json.load(archivo)
+        self.assertEqual(len(guardado["votos"]), 1)
+        self.assertEqual(guardado["reiniciado_en"], datos["reiniciado_en"])
+        self.assertEqual(self.json("GET", "/api/perfil")[1]["prioridades"], [])
 
 
 if __name__ == "__main__":

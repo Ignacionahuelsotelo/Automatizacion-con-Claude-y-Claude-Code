@@ -13,7 +13,12 @@
       <p class="fecha" id="fecha-hoy"></p>
       <h1>Mi Café</h1>
       <p class="bajada">Los números del día y las notas de ayer, con su fuente.</p>
+      <nav class="navegacion" aria-label="Secciones de la página">
+        <a href="#preferencias" id="abrir-preferencias" class="boton-enlace">Preferencias</a>
+      </nav>
     </header>
+
+    <div id="vista-resumen">
 
     <section>
       <h2 class="rotulo">Indicadores</h2>
@@ -36,6 +41,11 @@
         <ol id="etapas-resumen" class="etapas" aria-live="polite" hidden></ol>
         <p id="aviso-corrector" class="aviso" role="status" aria-live="polite" hidden></p>
         <p id="cabecera-resumen" class="cabecera-resumen" hidden></p>
+        <p id="aviso-pedido" class="aviso aviso-pedido" role="status" aria-live="polite" hidden></p>
+        <details id="como-se-armo" class="como-se-armo" hidden>
+          <summary>Cómo se armó hoy</summary>
+          <div id="como-se-armo-contenido"></div>
+        </details>
         <div id="resumen" class="resumen"></div>
         <p id="estado-voto-resumen" class="estado" aria-live="polite"></p>
         <div id="caja-preguntas" class="caja-preguntas" hidden>
@@ -61,18 +71,67 @@
         <section>
           <h2 class="rotulo">Mis preferencias</h2>
           <p id="aviso" class="aviso" role="status" aria-live="polite" hidden></p>
-          <fieldset>
-            <legend>Indicadores</legend>
-            <div id="indicadores"></div>
-          </fieldset>
-          <fieldset>
-            <legend>Temas</legend>
-            <div id="temas"></div>
-          </fieldset>
-          <p id="estado" class="estado" aria-live="polite"></p>
+          <p id="resumen-prefs" class="resumen-prefs"></p>
+          <p><a href="#preferencias" class="enlace-cambiar">Cambiar</a></p>
         </section>
       </div>
     </div>
+    </div>
+
+    <section id="preferencias" class="vista" aria-labelledby="titulo-preferencias" hidden>
+      <p><button type="button" id="volver-resumen" class="boton-chico">Volver al resumen</button></p>
+      <h2 id="titulo-preferencias" class="rotulo" tabindex="-1">Preferencias</h2>
+      <p id="estado-carga-prefs" class="estado" aria-live="polite"></p>
+
+      <div id="aviso-cambios" class="aviso" role="alert" hidden>
+        <p>Tenés cambios sin guardar.</p>
+        <button type="button" id="cambios-guardar" class="boton-chico">Guardar y salir</button>
+        <button type="button" id="cambios-descartar" class="boton-chico">Descartar y salir</button>
+        <button type="button" id="cambios-seguir" class="boton-chico">Seguir editando</button>
+      </div>
+
+      <fieldset>
+        <legend>Temas</legend>
+        <p class="ayuda">Elegí qué temas querés en el resumen y qué tanto peso tiene cada uno.</p>
+        <div id="pref-temas"></div>
+        <p id="estado" class="estado" aria-live="polite"></p>
+      </fieldset>
+      <fieldset id="pref-subtemas-bloque" hidden>
+        <legend>Subtemas de Deportes</legend>
+        <p class="ayuda">Si no tildás ninguno, entran todos.</p>
+        <div id="pref-subtemas"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Medios que prefiero</legend>
+        <div id="pref-medios-preferidos" class="lista-casillas"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Medios que no quiero ver</legend>
+        <div id="pref-medios-excluidos" class="lista-casillas"></div>
+      </fieldset>
+      <p id="estado-medios" class="estado" role="status"></p>
+      <fieldset>
+        <legend>Indicadores visibles</legend>
+        <div id="pref-indicadores"></div>
+      </fieldset>
+      <div id="pref-palabras"></div>
+
+      <div class="acciones-prefs">
+        <button type="button" id="guardar-prefs" class="boton">Guardar</button>
+        <p id="aviso-temas" class="estado" role="status"></p>
+        <p id="estado-guardado" class="estado" role="status"></p>
+        <div id="errores-prefs" class="aviso" role="alert" hidden></div>
+      </div>
+
+      <section id="perfil-aprendido" class="bloque-perfil" aria-labelledby="titulo-perfil">
+        <h3 id="titulo-perfil">Lo que aprendí de tus 👍/👎</h3>
+        <div id="perfil-contenido"></div>
+        <p>
+          <button type="button" id="reiniciar-aprendido" class="boton-chico">Reiniciar lo aprendido</button>
+          <span id="estado-reinicio-vista" class="estado-reinicio" role="status"></span>
+        </p>
+      </section>
+    </section>
   </div>
 
   <script src="app.js"></script>

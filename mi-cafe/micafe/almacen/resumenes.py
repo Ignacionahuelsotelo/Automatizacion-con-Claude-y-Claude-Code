@@ -8,13 +8,14 @@ from datetime import datetime
 
 from micafe.almacen import json_seguro
 from micafe.config import CANTIDAD_PREVIOS, CARPETA_RESUMENES, ZONA
-from micafe.modelos import Chequeo, Indicador, ResumenGuardado
+from micafe.modelos import Chequeo, Indicador, PlanDelDia, ResumenGuardado
 
 RE_ARCHIVO_RESUMEN = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
 
 
 def guardar(texto: str, indicadores_mostrados: list[Indicador], chequeo: Chequeo, ahora: datetime,
-            carpeta: str = CARPETA_RESUMENES, pedido: str | None = None) -> ResumenGuardado:
+            carpeta: str = CARPETA_RESUMENES, pedido: str | None = None,
+            pedido_sin_notas: bool | None = None, plan: PlanDelDia | None = None) -> ResumenGuardado:
     """Guarda el resumen de hoy en AAAA-MM-DD.json y devuelve el registro.
 
     `pedido` (spec 35) se guarda como campo "pedido" solo si hay; sin pedido no se escribe.
@@ -32,6 +33,10 @@ def guardar(texto: str, indicadores_mostrados: list[Indicador], chequeo: Chequeo
     }
     if pedido:
         registro["pedido"] = pedido
+    if pedido_sin_notas is not None:
+        registro["pedido_sin_notas"] = pedido_sin_notas  # spec 39
+    if plan is not None:
+        registro["plan"] = plan  # spec 40
     json_seguro.escribir(os.path.join(carpeta, f"{registro['fecha']}.json"), registro)
     return registro
 
